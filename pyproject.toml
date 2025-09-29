@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "graphmcf"
+version = "0.1.0"
+description = "Контролируемая генерация графа корреспонденций (OD-графа) с alpha-контролем"
+readme = "README.md"
+authors = [
+    { name = "Karasiari", email = "stranwaros@gmail.com" }
+]
+license = { text = "MIT" }
+requires-python = ">=3.9"
+
+dependencies = [
+    "numpy>=1.22",
+    "scipy>=1.9",
+    "networkx>=3.0",
+    "matplotlib>=3.6",
+    "pandas>=1.5",
+]
+
+[project.urls]
+"Homepage" = "https://github.com/Karasiari/graphmcf"
+"Bug Tracker" = "https://github.com/Karasiari/graphmcf/issues"
