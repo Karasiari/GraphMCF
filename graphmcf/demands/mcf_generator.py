@@ -135,22 +135,30 @@ class MCFGenerator:
             old = graph.remove_edge_by_indices(iu, iv)
             E_alive[idx] = False
             return old
+            
+        def upsert(iu: int, iv: int, delta_w: float,
+                   E_u, E_v, E_alive, E_w, eid: Dict[Tuple[int,int], int]):
+            nonlocal E_u, E_v, E_w, E_alive  # ← добавили nonlocal, чтобы можно было перепривязать массивы
+               
+            if iu > iv:
+                iu, iv = iv, iu
 
-        def upsert(iu: int, iv: int, delta_w: float, E_u, E_v, E_alive, E_w, eid: Dict[Tuple[int,int], int]):
-            if iu > iv: iu, iv = iv, iu
             new_w = graph.upsert_edge_by_indices(iu, iv, delta_w)
             key = (iu, iv)
+
             if key in eid:
                 j = eid[key]
-                E_w[j] = new_w; E_alive[j] = True
+                E_w[j] = new_w
+                E_alive[j] = True
             else:
-                j = E_w.size
+                j = E_w.size                       # индекс нового элемента — старая длина
                 eid[key] = j
-                E_u[:] = np.append(E_u, iu)
-                E_v[:] = np.append(E_v, iv)
-                E_w[:] = np.append(E_w, new_w)
-                E_alive[:] = np.append(E_alive, True)
-
+                # пере-создаем массивы с добавленным значением (НЕ через срез!)
+                E_u = np.append(E_u, iu)
+                E_v = np.append(E_v, iv)
+                E_w = np.append(E_w, new_w)
+                E_alive = np.append(E_alive, True)
+        
         E_u, E_v, E_w, E_alive, eid = build_edge_index()
 
         alpha_hist: List[float] = []
