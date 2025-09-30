@@ -190,6 +190,45 @@ class GraphMCF:
         tr = float(np.trace(L_alpha))
         return lam_max / tr if tr != 0.0 else float("inf")
 
+    def calculate_alpha_timed(self) -> (float, dict):
+        import time
+        import numpy as np
+        import networkx as nx
+
+        timings = {"t_prep": 0.0, "t_ld": 0.0, "t_lalpha": 0.0, "t_eig": 0.0}
+
+        if self.graph_pinv_sqrt is None:
+            t0 = time.perf_counter()
+            nodelist = list(self.graph.nodes())
+            Lg = nx.laplacian_matrix(self.graph, nodelist=nodelist, weight="weight").astype(float).toarray()
+            Lg_pinv = np.linalg.pinv(Lg)
+            from scipy.linalg import fractional_matrix_power
+            self.graph_pinv_sqrt = fractional_matrix_power(Lg_pinv, 0.5)
+            timings["t_prep"] = time.perf_counter() - t0
+
+        S = self.graph_pinv_sqrt
+        
+        t0 = time.perf_counter()
+        if self.demands_laplacian is None:
+            nodelist = list(self.graph.nodes())
+            self.demands_laplacian = nx.laplacian_matrix(self.demands_graph, nodelist=nodelist, weight="weight").astype(float).toarray()
+        Ld = self.demands_laplacian
+        timings["t_ld"] = time.perf_counter() - t0
+
+        t0 = time.perf_counter()
+        SLd = S @ Ld
+        L_alpha = SLd @ S
+        timings["t_lalpha"] = time.perf_counter() - t0
+
+        t0 = time.perf_counter()
+        eig, _ = eigsh(L_alpha, k=1, which="LA")
+        lam_max = float(eig[0]) if eig.size else 0.0
+        timings["t_eig"] = time.perf_counter() - t0
+
+        tr = float(np.trace(L_alpha))
+        alpha = lam_max / tr if tr != 0.0 else float("inf")
+        return alpha, timings
+
     def generate_cut(self, type: str = "friendly", rng_seed: Optional[int] = None) -> np.ndarray:
         if type not in {"friendly", "adversarial"}:
             raise ValueError("type должен быть 'friendly' или 'adversarial'")
