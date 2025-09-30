@@ -247,7 +247,7 @@ def plot_overall_summary_single(df_graph: pd.DataFrame,
     # 6) mean_overlap_ratio
     ax = plt.subplot(2, 3, 5)
     scatter_with_line(ax, "mean_overlap_ratio",
-                      "Средняя доля общих рёбер (снимки /50 ит.)", "mean |∩| / |E_k|", ylim=(0, 1))
+                      "Средняя доля общих рёбер (снимки /50 ит.)", "mean_k |E_k ∩ E_{k-1}| / |E_k|", ylim=(0, 1))
 
     # 7) execution_time
     ax = plt.subplot(2, 3, 6)
