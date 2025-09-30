@@ -7,7 +7,6 @@ import numpy as np
 from scipy.stats import norm
 
 from ..core import GraphMCF
-from ..analysis.overall import pack_overall_dict
 
 @dataclass
 class TimeTestResult:
@@ -24,21 +23,27 @@ class TimeTestResult:
     timings: Dict[str, Any]  # детальные тайминги
 
     def to_dict(self) -> Dict[str, Any]:
-        d = pack_overall_dict(self.graph, self.alpha_target, self.epsilon,
-                              self.start_time, self.end_time,
-                              self.alpha_history, self.edge_counts_history, self.median_weights_history)
-        d["timings"] = self.timings
-        return d
+        return {
+            "alpha_target": self.alpha_target,
+            "epsilon": self.epsilon,
+            "execution_time": float(self.end_time - self.start_time),
+            "iterations_total": self.iterations_total,
+            "initial_alpha": float(self.alpha_history[0]) if self.alpha_history else None,
+            "final_alpha": float(self.alpha_history[-1]) if self.alpha_history else None,
+            "alpha_history": [float(x) for x in self.alpha_history],
+            "edge_counts_history": [int(x) for x in self.edge_counts_history],
+            "median_weights_history": [float(x) for x in self.median_weights_history],
+            "timings": self.timings,
+        }
 
 class MCFGeneratorWithTimeTest:
     """
-    Временный (профилировочный) вариант генератора MCF.
-    На каждой итерации замеряет:
-      - t_alpha: время calculate_alpha()
+    Профилировочная копия MCF-генератора. На каждой итерации меряет:
+      - t_alpha: время calculate_alpha() (внутри — разложение на t_prep, t_ld, t_lalpha, t_eig)
       - t_cut:   время generate_cut()
-      - t_edit:  время изменения рёбер (remove / upsert)
-    Каждые report_every итераций печатает агрегированные суммы по окну, а также общие суммы.
-    Отдельно замеряется initial_demands_time (инициализация корреспонденций).
+      - t_edit:  время модификации рёбер (remove/upsert)
+    Каждые report_every итераций выводит окно агрегатов, плюс возвращает все суммы/окна в result.timings.
+    Отдельно замеряется initial_demands.
     """
 
     def __init__(
@@ -59,7 +64,7 @@ class MCFGeneratorWithTimeTest:
         self.report_every = int(report_every)
         self.verbose = bool(verbose)
 
-    # -------- утилиты распределения весов --------
+    # ---------- утилиты распределения весов ----------
     def _draw_new_weight(self, old_w: float, mode: str, median: int, var: int) -> int:
         lo, hi = 1, max(2 * median, 2)
         xs = np.arange(lo, hi + 1)
@@ -84,12 +89,12 @@ class MCFGeneratorWithTimeTest:
             side = np.zeros_like(side, dtype=bool); side[0] = True
         return side
 
-    # -------- основной запуск --------
+    # ---------- основной запуск ----------
     def generate(
         self,
         graph: GraphMCF,
         alpha_target: float = 0.5,
-        analysis_mode: Optional[str] = None,  # не используется тут; оставлен для совместимости
+        analysis_mode: Optional[str] = None,  # оставлено для совместимости API
     ) -> TimeTestResult:
 
         # --- подготовка параметров распределения ---
@@ -144,9 +149,9 @@ class MCFGeneratorWithTimeTest:
                 if not np.isfinite(val): return None
                 cand = np.flatnonzero(w == val)
             j = np.random.randint(cand.size)
-            return int(cand[j])
+            return int(candidates := cand[j])
 
-        # — операции над demands-графом С ТАЙМИНГОМ изменения рёбер —
+        # операции над demands-графом с таймингом изменения рёбер
         def remove_by_idx(idx, E_u, E_v, E_alive, E_w, timing_acc):
             if not E_alive[idx]:
                 return None
@@ -173,7 +178,6 @@ class MCFGeneratorWithTimeTest:
             else:
                 j = E_w.size
                 eid[key] = j
-                # возвращаем НОВЫЕ массивы (переприсваивание снаружи)
                 E_u = np.append(E_u, iu)
                 E_v = np.append(E_v, iv)
                 E_w = np.append(E_w, new_w)
@@ -181,8 +185,7 @@ class MCFGeneratorWithTimeTest:
                 timing_acc[0] += (time.perf_counter() - t0)
                 return E_u, E_v, E_alive, E_w
 
-        # --- таймеры по итерациям ---
-        # накапливаем по итерациям и печатаем каждые report_every
+        # --- таймеры по итерациям и структуры таймингов ---
         t_alpha_sum = 0.0
         t_cut_sum = 0.0
         t_edit_sum = 0.0
@@ -190,9 +193,12 @@ class MCFGeneratorWithTimeTest:
 
         timings = {
             "initial_demands": initial_demands_time,
-            "per_window": [],   # список блоков: {"iters":[i0,i1), "t_alpha":..., "t_cut":..., "t_edit":...}
+            "per_window": [],   # [{"iters":[i0,i1], "t_alpha":..., "t_cut":..., "t_edit":...}, ...]
             "totals": {"t_alpha": 0.0, "t_cut": 0.0, "t_edit": 0.0},
+            "alpha_parts_totals": {"t_prep": 0.0, "t_ld": 0.0, "t_lalpha": 0.0, "t_eig": 0.0},
+            "alpha_parts_per_window": []  # [{"iters":[i0,i1], "t_prep":..., "t_ld":..., "t_lalpha":..., "t_eig":...}]
         }
+        _win_alpha_parts = {"t_prep":0.0,"t_ld":0.0,"t_lalpha":0.0,"t_eig":0.0}
 
         # --- основной цикл ---
         E_u, E_v, E_w, E_alive, eid = build_edge_index()
@@ -203,12 +209,14 @@ class MCFGeneratorWithTimeTest:
 
         start = time.perf_counter()
 
-        # итерация 0: считаем alpha (таймим)
-        t0 = time.perf_counter()
-        a = graph.calculate_alpha()
-        t1 = time.perf_counter()
-        t_alpha_sum += (t1 - t0)
-        timings["totals"]["t_alpha"] += (t1 - t0)
+        # итерация 0: считаем alpha (разложение по частям)
+        a, parts = graph.calculate_alpha_timed()
+        dt_alpha = parts["t_prep"] + parts["t_ld"] + parts["t_lalpha"] + parts["t_eig"]
+        t_alpha_sum += dt_alpha
+        timings["totals"]["t_alpha"] += dt_alpha
+        for k in timings["alpha_parts_totals"]:
+            timings["alpha_parts_totals"][k] += parts[k]
+            _win_alpha_parts[k] += parts[k]
 
         alpha_history.append(a)
         edge_counts_history.append(graph.demands_graph.number_of_edges())
@@ -219,26 +227,23 @@ class MCFGeneratorWithTimeTest:
         while it < max_iter and abs(a - alpha_target) > self.epsilon:
             it += 1
 
-            # выбираем направление шага (таймим generate_cut)
+            # --- generate_cut (таймим) ---
             t0 = time.perf_counter()
             if (a - alpha_target) < -self.epsilon:
-                # adversarial: хотим увеличить alpha
-                v = graph.generate_cut(type="adversarial")
+                v = graph.generate_cut(type="adversarial")  # хотим увеличить alpha
                 cut_type = "adversarial"
             else:
-                # friendly: хотим уменьшить alpha
-                v = graph.generate_cut(type="friendly")
+                v = graph.generate_cut(type="friendly")     # хотим уменьшить alpha
                 cut_type = "friendly"
-            t1 = time.perf_counter()
-            dt_cut = (t1 - t0)
+            dt_cut = time.perf_counter() - t0
             t_cut_sum += dt_cut
             timings["totals"]["t_cut"] += dt_cut
 
             side = self._split_by_median(np.asarray(v, dtype=float))
             internal_mask, _ = masks_for_cut(side, E_u, E_v, E_alive)
 
-            # выбор удаляемого ребра и модификация (таймим remove/upsert суммарно)
-            t_edit_acc = [0.0]  # аккумулятор времени редактирования рёбер
+            # --- изменения рёбер (таймим remove/upsert суммарно) ---
+            t_edit_acc = [0.0]
 
             if cut_type == "adversarial":
                 j = pick_idx(internal_mask, E_w, "min") or pick_idx(E_alive, E_w, "min")
@@ -275,20 +280,21 @@ class MCFGeneratorWithTimeTest:
             t_edit_sum += t_edit_acc[0]
             timings["totals"]["t_edit"] += t_edit_acc[0]
 
-            # пересчёт alpha (таймим)
-            t0 = time.perf_counter()
-            a = graph.calculate_alpha()
-            t1 = time.perf_counter()
-            dt_alpha = (t1 - t0)
+            # --- пересчёт alpha (таймированный, с разложением) ---
+            a, parts = graph.calculate_alpha_timed()
+            dt_alpha = parts["t_prep"] + parts["t_ld"] + parts["t_lalpha"] + parts["t_eig"]
             t_alpha_sum += dt_alpha
             timings["totals"]["t_alpha"] += dt_alpha
+            for k in timings["alpha_parts_totals"]:
+                timings["alpha_parts_totals"][k] += parts[k]
+                _win_alpha_parts[k] += parts[k]
 
             alpha_history.append(a)
             edge_counts_history.append(graph.demands_graph.number_of_edges())
             w_now = [d["weight"] for *_ , d in graph.demands_graph.edges(data=True)]
             median_weights_history.append(float(np.median(w_now)) if w_now else 0.0)
 
-            # окно отчёта
+            # --- окно отчёта каждые report_every итераций ---
             if it % self.report_every == 0:
                 block = {
                     "iters": [window_start_iter, it],
@@ -297,14 +303,22 @@ class MCFGeneratorWithTimeTest:
                     "t_edit": t_edit_sum,
                 }
                 timings["per_window"].append(block)
+
+                timings["alpha_parts_per_window"].append({
+                    "iters": [window_start_iter, it],
+                    **_win_alpha_parts
+                })
+
                 if self.verbose:
                     print(f"[iters {window_start_iter:>5d}..{it:>5d}]: "
-                          f"alpha={t_alpha_sum:.4f}s, cut={t_cut_sum:.4f}s, edit={t_edit_sum:.4f}s")
-                # обнуляем окно
+                          f"alpha={t_alpha_sum:.4f}s, cut={t_cut_sum:.4f}s, edit={t_edit_sum:.4f}s | "
+                          f"alpha_parts={_win_alpha_parts}")
+
                 window_start_iter = it
                 t_alpha_sum = t_cut_sum = t_edit_sum = 0.0
+                _win_alpha_parts = {"t_prep":0.0,"t_ld":0.0,"t_lalpha":0.0,"t_eig":0.0}
 
-        # финальный «хвост» окна (если не кратно report_every)
+        # --- финальный «хвост» окна ---
         if (it % self.report_every) != 0:
             block = {
                 "iters": [window_start_iter, it],
@@ -313,9 +327,16 @@ class MCFGeneratorWithTimeTest:
                 "t_edit": t_edit_sum,
             }
             timings["per_window"].append(block)
+
+            timings["alpha_parts_per_window"].append({
+                "iters": [window_start_iter, it],
+                **_win_alpha_parts
+            })
+
             if self.verbose:
                 print(f"[iters {window_start_iter:>5d}..{it:>5d}]: "
-                      f"alpha={t_alpha_sum:.4f}s, cut={t_cut_sum:.4f}s, edit={t_edit_sum:.4f}s")
+                      f"alpha={t_alpha_sum:.4f}s, cut={t_cut_sum:.4f}s, edit={t_edit_sum:.4f}s | "
+                      f"alpha_parts={_win_alpha_parts}")
 
         end = time.perf_counter()
 
