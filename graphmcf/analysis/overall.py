@@ -1,3 +1,4 @@
+# graphmcf/analysis/overall.py
 from __future__ import annotations
 from typing import List, Dict, Any, Optional, Iterable, Tuple
 import numpy as np
@@ -14,7 +15,7 @@ def pack_overall_dict(graph,
                       median_weights_history: Iterable[float]) -> Dict[str, Any]:
     """
     Базовая «заморозка» результатов одиночного прогона для сводного анализа.
-    (Оставлено совместимым со старыми вызовами.)
+    Совместимо со старыми вызовами.
     """
     a = np.array(alpha_history, dtype=float)
     dif = a - alpha_target
@@ -71,7 +72,7 @@ def pack_overall_dict(graph,
         "median_weights_history": [float(x) for x in median_weights_history],
     }
 
-# ---------------------------------------------------------------------------
+# ---------------------------- helpers --------------------------------------
 
 def _align_masks(m1: np.ndarray, m2: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
     """Выравнивает две булевы маски по длине (короткую дополняет False)."""
@@ -86,7 +87,7 @@ def _align_masks(m1: np.ndarray, m2: np.ndarray) -> Tuple[np.ndarray, np.ndarray
 
 def compute_overlap_ratio_mean(edge_mask_history: Optional[List[np.ndarray]]) -> Optional[float]:
     """
-    Возвращает среднюю долю общих рёбер между соседними снимками:
+    Средняя доля общих рёбер между соседними снимками:
         mean_k |E_k ∩ E_{k-1}| / |E_k|
     Если снимков < 2, вернёт None.
     """
@@ -111,12 +112,12 @@ def compute_internal_removal_ratio(removal_events: Optional[List[Dict[str, Any]]
     intr = sum(1 for ev in removal_events if bool(ev.get("was_internal", False)))
     return (intr / tot) if tot > 0 else None
 
-# ---------------------------------------------------------------------------
+# -------------------------- dataframe utils --------------------------------
 
 def records_to_dataframe(records: List[Dict[str, Any]]) -> pd.DataFrame:
     """
-    Превращает список замороженных словарей (с метаданными) в DataFrame,
-    заполняя все необходимые производные метрики для графиков.
+    Превращает список «замороженных» словарей (records) в DataFrame
+    и добавляет производные метрики для графиков.
     """
     rows = []
     for r in records:
@@ -145,88 +146,12 @@ def records_to_dataframe(records: List[Dict[str, Any]]) -> pd.DataFrame:
         })
     return pd.DataFrame(rows)
 
-# ---------------------------------------------------------------------------
-
-def plot_overall_summary(df: pd.DataFrame) -> None:
-    """
-    Рисует 6 графиков (пп. 2–7), как в задаче:
-      2) доля плохих подгонов vs alpha_target (цвет — сходимость)
-      3) финальные/начальные рёбра vs alpha_target (цвет — сходимость)
-      4) медиана весов фин./нач. vs alpha_target (цвет — сходимость)
-      5) доля внутрикластерных удалений vs alpha_target
-      6) средняя доля общих рёбер (по снимкам) vs alpha_target
-      7) время работы vs alpha_target
-    """
-    if df.empty:
-        print("Нет данных для отрисовки.")
-        return
-
-    # палитра по сходимости
-    colors = np.where(df["converged"].values, "green", "red")
-
-    plt.figure(figsize=(16, 12))
-
-    # 2) bad_ratio_total
-    ax = plt.subplot(2, 3, 1)
-    ax.scatter(df["alpha_target"], df["bad_ratio_total"], c=colors, s=30)
-    ax.set_title("Доля плохих подгонов vs alpha_target")
-    ax.set_xlabel("alpha_target")
-    ax.set_ylabel("доля плохих")
-    ax.grid(alpha=.3)
-
-    # 3) edges_ratio
-    ax = plt.subplot(2, 3, 2)
-    ax.scatter(df["alpha_target"], df["edges_ratio"], c=colors, s=30)
-    ax.set_title("|E_final| / |E_initial| vs alpha_target")
-    ax.set_xlabel("alpha_target")
-    ax.set_ylabel("отношение числа рёбер")
-    ax.grid(alpha=.3)
-
-    # 4) median_ratio
-    ax = plt.subplot(2, 3, 3)
-    ax.scatter(df["alpha_target"], df["median_ratio"], c=colors, s=30)
-    ax.set_title("median_w(final) / median_w(initial) vs alpha_target")
-    ax.set_xlabel("alpha_target")
-    ax.set_ylabel("отношение медиан весов")
-    ax.grid(alpha=.3)
-
-    # 5) internal_removed_ratio
-    ax = plt.subplot(2, 3, 4)
-    y = df["internal_removed_ratio"].astype(float)
-    ax.scatter(df["alpha_target"], y, c=colors, s=30)
-    ax.set_title("Доля внутрикластерных среди удалённых ребер")
-    ax.set_xlabel("alpha_target")
-    ax.set_ylabel("доля внутрикластерных удалений")
-    ax.set_ylim(0, 1)
-    ax.grid(alpha=.3)
-
-    # 6) mean_overlap_ratio
-    ax = plt.subplot(2, 3, 5)
-    y = df["mean_overlap_ratio"].astype(float)
-    ax.scatter(df["alpha_target"], y, c=colors, s=30)
-    ax.set_title("Средняя доля общих рёбер (снимки /50 ит.)")
-    ax.set_xlabel("alpha_target")
-    ax.set_ylabel("mean |∩| / |E_k|")
-    ax.set_ylim(0, 1)
-    ax.grid(alpha=.3)
-
-    # 7) execution_time
-    ax = plt.subplot(2, 3, 6)
-    ax.scatter(df["alpha_target"], df["execution_time"], c=colors, s=30)
-    ax.set_title("Время работы vs alpha_target")
-    ax.set_xlabel("alpha_target")
-    ax.set_ylabel("секунды")
-    ax.grid(alpha=.3)
-
-    plt.tight_layout()
-    plt.show()
-
 def print_overall_header(df: pd.DataFrame) -> None:
     """
-    Печатает «общую сводку» (п.1):
+    Печатает «общую сводку»:
       - количество вершин по графам
       - выбранный epsilon (если один; иначе множество)
-      - среднее initial_alpha по всем прогоном
+      - среднее initial_alpha по всем прогонам
       - число сошедшихся запусков из всех
     """
     if df.empty:
@@ -252,9 +177,86 @@ def print_overall_header(df: pd.DataFrame) -> None:
     print(f"Среднее initial_alpha: {init_alpha_mean:.4f}")
     print(f"Сошедшихся запусков: {conv_count} из {total} ({conv_count/total:.2%})")
 
+# ----------------------------- plotting ------------------------------------
+
+def plot_overall_summary(df: pd.DataFrame) -> None:
+    """
+    Рисует 6 графиков (пп. 2–7 из ТЗ).
+    Добавлены линии (по alpha_target), плотная сетка (major+minor) и легенда.
+    """
+    if df.empty:
+        print("Нет данных для отрисовки.")
+        return
+
+    # цвет по сходимости
+    conv_mask = df["converged"].values
+    colors = np.where(conv_mask, "green", "red")
+
+    # отсортируем по alpha_target для линий
+    df_sorted = df.sort_values("alpha_target")
+    alphas_sorted = df_sorted["alpha_target"].values
+
+    plt.figure(figsize=(18, 12))
+
+    def scatter_with_line(ax, ycol, title, ylabel, ylim=None):
+        yvals = df_sorted[ycol].astype(float).values
+        # линия
+        ax.plot(alphas_sorted, yvals, lw=1.8, color="gray", alpha=0.8, zorder=1)
+        # точки
+        ax.scatter(df["alpha_target"], df[ycol].astype(float), c=colors, s=46, zorder=2,
+                   edgecolor="black", linewidth=0.5)
+        ax.set_title(title)
+        ax.set_xlabel("alpha_target")
+        ax.set_ylabel(ylabel)
+        if ylim is not None:
+            ax.set_ylim(*ylim)
+        # более плотная сетка
+        ax.grid(which="major", alpha=.6)
+        ax.grid(which="minor", alpha=.3, linestyle=":")
+        ax.minorticks_on()
+
+    # 2) bad_ratio_total
+    ax = plt.subplot(2, 3, 1)
+    scatter_with_line(ax, "bad_ratio_total", "Доля плохих подгонов", "доля плохих")
+
+    # 3) edges_ratio
+    ax = plt.subplot(2, 3, 2)
+    scatter_with_line(ax, "edges_ratio", "|E_final| / |E_initial|", "отношение числа рёбер")
+
+    # 4) median_ratio
+    ax = plt.subplot(2, 3, 3)
+    scatter_with_line(ax, "median_ratio", "median_w(final) / median_w(initial)", "отношение медиан весов")
+
+    # 5) internal_removed_ratio
+    ax = plt.subplot(2, 3, 4)
+    scatter_with_line(ax, "internal_removed_ratio",
+                      "Доля внутрикластерных удалённых рёбер", "доля внутрикластерных", ylim=(0, 1))
+
+    # 6) mean_overlap_ratio
+    ax = plt.subplot(2, 3, 5)
+    scatter_with_line(ax, "mean_overlap_ratio",
+                      "Средняя доля общих рёбер (снимки /50 ит.)", "mean |∩| / |E_k|", ylim=(0, 1))
+
+    # 7) execution_time
+    ax = plt.subplot(2, 3, 6)
+    scatter_with_line(ax, "execution_time", "Время работы", "секунды")
+
+    # единая легенда по цветам
+    import matplotlib.patches as mpatches
+    green_patch = mpatches.Patch(color="green", label="сошёлся")
+    red_patch = mpatches.Patch(color="red", label="не сошёлся")
+    plt.legend(handles=[green_patch, red_patch],
+               loc="upper center", bbox_to_anchor=(-0.05, -0.06),
+               fancybox=True, shadow=True, ncol=2)
+
+    plt.tight_layout()
+    plt.show()
+
+# ----------------------------- main helper ---------------------------------
+
 def analyze_overall_batch(records: List[Dict[str, Any]]) -> pd.DataFrame:
     """
-    Удобный помощник: превращает записи в DataFrame, печатает сводку (п.1)
+    Превращает записи в DataFrame, печатает общую сводку (п.1)
     и рисует все 6 графиков (пп.2–7). Возвращает DataFrame.
     """
     df = records_to_dataframe(records)
