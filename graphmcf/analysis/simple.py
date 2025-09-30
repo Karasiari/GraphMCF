@@ -82,15 +82,25 @@ def analyze_simple(graph, alpha_target, epsilon, start_time, end_time,
     plt.title("median weight (demands)"); plt.grid(alpha=.3)
     plt.tight_layout(); plt.show()
 
-    # --- ДОП. ГРАФИКИ СТАБИЛЬНОСТИ (если передана история масок/удалений) ---
+    # ===== Доп. графики стабильности =====
 
-    # 1) График стабильности: |E_k ∩ E_{k-1}| vs итерация снимка
+    def _align_masks(m1: np.ndarray, m2: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+        """Выравнивает две булевы маски по длине (короткую дополняет False)."""
+        m1 = np.asarray(m1, dtype=bool)
+        m2 = np.asarray(m2, dtype=bool)
+        L = max(m1.size, m2.size)
+        if m1.size < L:
+            tmp = np.zeros(L, dtype=bool); tmp[:m1.size] = m1; m1 = tmp
+        if m2.size < L:
+            tmp = np.zeros(L, dtype=bool); tmp[:m2.size] = m2; m2 = tmp
+        return m1, m2
+
+    # 1) |E_k ∩ E_{k-1}|
     if edge_mask_history and edge_mask_snapshot_iters and len(edge_mask_history) >= 2:
         overlap_counts = []
         snap_x = []
         for k in range(1, len(edge_mask_history)):
-            prev_mask = np.asarray(edge_mask_history[k-1], dtype=bool)
-            curr_mask = np.asarray(edge_mask_history[k], dtype=bool)
+            prev_mask, curr_mask = _align_masks(edge_mask_history[k-1], edge_mask_history[k])
             common = int(np.count_nonzero(prev_mask & curr_mask))
             overlap_counts.append(common)
             snap_x.append(int(edge_mask_snapshot_iters[k]))
@@ -98,72 +108,56 @@ def analyze_simple(graph, alpha_target, epsilon, start_time, end_time,
         plt.plot(snap_x, overlap_counts, lw=2)
         plt.title("Стабильность рёбер: |E_k ∩ E_{k-1}|")
         plt.xlabel("итерация (снимки раз в 50)"); plt.ylabel("кол-во общих рёбер")
-        plt.grid(alpha=.3)
-        plt.show()
+        plt.grid(alpha=.3); plt.show()
 
-    # 2) Нормированная стабильность: |E_k ∩ E_{k-1}| / |E_k|
+    # 2) |E_k ∩ E_{k-1}| / |E_k|
     if edge_mask_history and edge_mask_snapshot_iters and len(edge_mask_history) >= 2:
         overlap_ratio = []
         snap_x = []
         for k in range(1, len(edge_mask_history)):
-            prev_mask = np.asarray(edge_mask_history[k-1], dtype=bool)
-            curr_mask = np.asarray(edge_mask_history[k], dtype=bool)
+            prev_mask, curr_mask = _align_masks(edge_mask_history[k-1], edge_mask_history[k])
             common = np.count_nonzero(prev_mask & curr_mask)
-            curr_sz = max(1, int(np.count_nonzero(curr_mask)))  # чтобы не делить на 0
+            curr_sz = max(1, int(np.count_nonzero(curr_mask)))  # защита от деления на 0
             overlap_ratio.append(float(common) / float(curr_sz))
             snap_x.append(int(edge_mask_snapshot_iters[k]))
         plt.figure(figsize=(10,4))
         plt.plot(snap_x, overlap_ratio, lw=2)
         plt.title("Стабильность (норм.): |E_k ∩ E_{k-1}| / |E_k|")
         plt.xlabel("итерация (снимки раз в 50)"); plt.ylabel("доля общих рёбер")
-        plt.grid(alpha=.3)
-        plt.show()
+        plt.ylim(0, 1); plt.grid(alpha=.3); plt.show()
 
     # 3) Доля внутрикластерных удалений по окнам из 10 итераций
     if removal_events:
         events = removal_events
-        # опорный максимум по осям
-        max_it = 0
-        for ev in events:
-            if "iter" in ev and isinstance(ev["iter"], (int, float)):
-                max_it = max(max_it, int(ev["iter"]))
-        if not max_it and a.size:
-            max_it = len(a) - 1
-
-        # агрегируем по окнам 10 итераций: (1..10], (11..20], ...
-        # bucket = (iter-1)//10
         buckets_internal = {}
         buckets_total = {}
         for ev in events:
-            it = int(ev.get("iter", 0))
-            b = (it - 1) // 10 if it > 0 else 0
+            it_ev = int(ev.get("iter", 0))
+            b = (it_ev - 1) // 10 if it_ev > 0 else 0
             buckets_total[b] = buckets_total.get(b, 0) + 1
             if bool(ev.get("was_internal", False)):
                 buckets_internal[b] = buckets_internal.get(b, 0) + 1
 
-        # построим серии по возрастанию бакетов
         bs = sorted(set(buckets_total.keys()) | set(buckets_internal.keys()))
-        xs = [ (b+1)*10 for b in bs ]  # верхняя граница окна как x
+        xs = [(b + 1) * 10 for b in bs]  # верхняя граница окна
         ys = []
         for b in bs:
             tot = buckets_total.get(b, 0)
             intr = buckets_internal.get(b, 0)
-            ys.append( (intr / tot) if tot > 0 else np.nan )
+            ys.append((intr / tot) if tot > 0 else np.nan)
 
         plt.figure(figsize=(10,4))
         plt.plot(xs, ys, lw=2)
         plt.title("Доля внутрикластерных удалённых рёбер (окна по 10 итераций)")
         plt.xlabel("итерация (верхняя граница окна)")
         plt.ylabel("доля внутрикластерных удалений")
-        plt.ylim(0, 1)
-        plt.grid(alpha=.3)
-        plt.show()
+        plt.ylim(0, 1); plt.grid(alpha=.3); plt.show()
 
     # короткая сводка (initial vs final) — округление до целых
     if getattr(graph, "initial_demands_graph", None) and getattr(graph, "demands_graph", None):
         Gi, Gf = graph.initial_demands_graph, graph.demands_graph
-        wi = [d["weight"] for *_ , d in Gi.edges(data=True)]
-        wf = [d["weight"] for *_ , d in Gf.edges(data=True)]
+        wi = [d["weight"] for *_, d in Gi.edges(data=True)]
+        wf = [d["weight"] for *_, d in Gf.edges(data=True)]
 
         def rint(x):
             return int(np.rint(x)) if isinstance(x, (int, float, np.floating)) else int(x)
