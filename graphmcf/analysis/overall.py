@@ -1,9 +1,10 @@
-# graphmcf/analysis/overall.py
 from __future__ import annotations
 from typing import List, Dict, Any, Optional, Iterable, Tuple
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
+
+# =========================== упаковка одиночного прогона ====================
 
 def pack_overall_dict(graph,
                       alpha_target: float,
@@ -72,7 +73,7 @@ def pack_overall_dict(graph,
         "median_weights_history": [float(x) for x in median_weights_history],
     }
 
-# ---------------------------- helpers --------------------------------------
+# =========================== helpers (общие метрики) ========================
 
 def _align_masks(m1: np.ndarray, m2: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
     """Выравнивает две булевы маски по длине (короткую дополняет False)."""
@@ -112,7 +113,7 @@ def compute_internal_removal_ratio(removal_events: Optional[List[Dict[str, Any]]
     intr = sum(1 for ev in removal_events if bool(ev.get("was_internal", False)))
     return (intr / tot) if tot > 0 else None
 
-# -------------------------- dataframe utils --------------------------------
+# ============================ dataframe utils ===============================
 
 def records_to_dataframe(records: List[Dict[str, Any]]) -> pd.DataFrame:
     """
@@ -131,6 +132,7 @@ def records_to_dataframe(records: List[Dict[str, Any]]) -> pd.DataFrame:
 
         rows.append({
             "graph_id": r.get("graph_id"),
+            "graph_name": r.get("graph_name"),
             "n_nodes": r.get("n_nodes"),
             "alpha_target": r.get("alpha_target"),
             "epsilon": r.get("epsilon"),
@@ -146,66 +148,76 @@ def records_to_dataframe(records: List[Dict[str, Any]]) -> pd.DataFrame:
         })
     return pd.DataFrame(rows)
 
-def print_overall_header(df: pd.DataFrame) -> None:
+# ===================== сводка и графики ДЛЯ ОДНОГО ГРАФА ====================
+
+def _name_or_id(graph_name: Optional[str], graph_id: Optional[int]) -> str:
+    if graph_name and str(graph_name).strip():
+        return str(graph_name)
+    return f"g{graph_id if graph_id is not None else '?'}"
+
+def print_overall_header_single(df_graph: pd.DataFrame,
+                                graph_id: int,
+                                graph_name: Optional[str]) -> None:
     """
-    Печатает «общую сводку»:
-      - количество вершин по графам
+    Печатает сводку для ОДНОГО графа (п.1):
+      - количество вершин графа
       - выбранный epsilon (если один; иначе множество)
-      - среднее initial_alpha по всем прогонам
-      - число сошедшихся запусков из всех
+      - среднее initial_alpha по батчу
+      - число сошедшихся запусков из всего по батчу
     """
-    if df.empty:
-        print("Сводка: данных нет.")
+    title = _name_or_id(graph_name, graph_id)
+    if df_graph.empty:
+        print(f"Сводка по графу {title}: данных нет.")
         return
 
-    # n_nodes по графам
-    groups = df.groupby("graph_id")["n_nodes"].max().to_dict()
-    nodes_line = ", ".join([f"g{gid}: {n}" for gid, n in sorted(groups.items())])
-
-    epsilons = sorted(set(df["epsilon"].dropna().astype(float).tolist()))
+    n_nodes = int(df_graph["n_nodes"].max()) if "n_nodes" in df_graph else None
+    epsilons = sorted(set(df_graph["epsilon"].dropna().astype(float).tolist()))
     eps_line = (f"{epsilons[0]}" if len(epsilons) == 1 else f"{epsilons}")
 
-    init_alpha_vals = df["initial_alpha"].dropna().astype(float)
+    init_alpha_vals = df_graph["initial_alpha"].dropna().astype(float)
     init_alpha_mean = init_alpha_vals.mean() if not init_alpha_vals.empty else float("nan")
 
-    conv_count = int(df["converged"].sum())
-    total = int(len(df))
+    conv_count = int(df_graph["converged"].sum())
+    total = int(len(df_graph))
 
-    print("=== ОБЩАЯ СВОДКА (batch) ===")
-    print(f"Вершины по графам: {nodes_line}")
+    print(f"\n=== СВОДКА ПО ГРАФУ {title} ===")
+    print(f"Вершины: {n_nodes}")
     print(f"epsilon: {eps_line}")
     print(f"Среднее initial_alpha: {init_alpha_mean:.4f}")
-    print(f"Сошедшихся запусков: {conv_count} из {total} ({conv_count/total:.2%})")
+    print(f"Сошедшихся запусков: {conv_count} из {total} ({(conv_count/total if total else 0):.2%})")
 
-# ----------------------------- plotting ------------------------------------
-
-def plot_overall_summary(df: pd.DataFrame) -> None:
+def plot_overall_summary_single(df_graph: pd.DataFrame,
+                                graph_id: int,
+                                graph_name: Optional[str]) -> None:
     """
-    Рисует 6 графиков (пп. 2–7 из ТЗ).
+    Рисует 6 графиков (пп. 2–7) для ОДНОГО графа.
     Добавлены линии (по alpha_target), плотная сетка (major+minor) и легенда.
     """
-    if df.empty:
-        print("Нет данных для отрисовки.")
+    title = _name_or_id(graph_name, graph_id)
+
+    if df_graph.empty:
+        print(f"Нет данных для отрисовки ({title}).")
         return
 
     # цвет по сходимости
-    conv_mask = df["converged"].values
+    conv_mask = df_graph["converged"].values
     colors = np.where(conv_mask, "green", "red")
 
     # отсортируем по alpha_target для линий
-    df_sorted = df.sort_values("alpha_target")
+    df_sorted = df_graph.sort_values("alpha_target")
     alphas_sorted = df_sorted["alpha_target"].values
 
     plt.figure(figsize=(18, 12))
+    plt.suptitle(f"Итоги по графу {title}", y=1.02, fontsize=14)
 
-    def scatter_with_line(ax, ycol, title, ylabel, ylim=None):
+    def scatter_with_line(ax, ycol, title_local, ylabel, ylim=None):
         yvals = df_sorted[ycol].astype(float).values
         # линия
         ax.plot(alphas_sorted, yvals, lw=1.8, color="gray", alpha=0.8, zorder=1)
         # точки
-        ax.scatter(df["alpha_target"], df[ycol].astype(float), c=colors, s=46, zorder=2,
+        ax.scatter(df_graph["alpha_target"], df_graph[ycol].astype(float), c=colors, s=46, zorder=2,
                    edgecolor="black", linewidth=0.5)
-        ax.set_title(title)
+        ax.set_title(title_local)
         ax.set_xlabel("alpha_target")
         ax.set_ylabel(ylabel)
         if ylim is not None:
@@ -235,31 +247,57 @@ def plot_overall_summary(df: pd.DataFrame) -> None:
     # 6) mean_overlap_ratio
     ax = plt.subplot(2, 3, 5)
     scatter_with_line(ax, "mean_overlap_ratio",
-                      "Средняя доля общих рёбер (снимки /50 ит.)", "mean_k |E_k ∩ E_{k-1}| / |E_k|", ylim=(0, 1))
+                      "Средняя доля общих рёбер (снимки /50 ит.)", "mean |∩| / |E_k|", ylim=(0, 1))
 
     # 7) execution_time
     ax = plt.subplot(2, 3, 6)
     scatter_with_line(ax, "execution_time", "Время работы", "секунды")
 
-    # единая легенда по цветам
+    # единая легенда по цветам (зелёный = сошёлся, красный = нет)
     import matplotlib.patches as mpatches
     green_patch = mpatches.Patch(color="green", label="сошёлся")
     red_patch = mpatches.Patch(color="red", label="не сошёлся")
     plt.legend(handles=[green_patch, red_patch],
-               loc="upper center", bbox_to_anchor=(-0.05, -0.06),
+               loc="upper center", bbox_to_anchor=(-0.05, -0.08),
                fancybox=True, shadow=True, ncol=2)
 
     plt.tight_layout()
     plt.show()
 
-# ----------------------------- main helper ---------------------------------
+def analyze_overall_for_graph(records_for_graph: List[Dict[str, Any]],
+                              graph_id: int,
+                              graph_name: Optional[str]) -> pd.DataFrame:
+    """
+    Принимает список records ТОЛЬКО для одного графа,
+    печатает сводку и рисует 6 графиков. Возвращает DataFrame.
+    """
+    df_g = records_to_dataframe(records_for_graph)
+    # проставим id/name, если вдруг нет
+    if not df_g.empty:
+        if "graph_id" not in df_g or df_g["graph_id"].isna().any():
+            df_g["graph_id"] = int(graph_id)
+        if "graph_name" not in df_g or df_g["graph_name"].isna().any():
+            df_g["graph_name"] = _name_or_id(graph_name, graph_id)
+    print_overall_header_single(df_g, graph_id, graph_name)
+    plot_overall_summary_single(df_g, graph_id, graph_name)
+    return df_g
 
-def analyze_overall_batch(records: List[Dict[str, Any]]) -> pd.DataFrame:
+def analyze_overall_for_all_graphs(records: List[Dict[str, Any]]) -> Dict[int, pd.DataFrame]:
     """
-    Превращает записи в DataFrame, печатает общую сводку (п.1)
-    и рисует все 6 графиков (пп.2–7). Возвращает DataFrame.
+    Группирует общий список records по graph_id и строит отчёт по каждому графу.
+    Использует graph_name из records, если он есть.
+    Возвращает {graph_id: df}.
     """
-    df = records_to_dataframe(records)
-    print_overall_header(df)
-    plot_overall_summary(df)
-    return df
+    if not records:
+        print("Данных нет.")
+        return {}
+    df_all = records_to_dataframe(records)
+    out: Dict[int, pd.DataFrame] = {}
+    for gid, df_g in df_all.groupby("graph_id"):
+        gname = None
+        if "graph_name" in df_g and not df_g["graph_name"].isna().all():
+            gname = str(df_g["graph_name"].iloc[0])
+        print_overall_header_single(df_g, int(gid), gname)
+        plot_overall_summary_single(df_g, int(gid), gname)
+        out[int(gid)] = df_g.copy()
+    return out
