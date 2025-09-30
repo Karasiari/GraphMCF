@@ -229,6 +229,6 @@ def generate(
         from ..analysis.simple import analyze_simple
         analyze_simple(graph, res.alpha_target, res.epsilon, res.start_time, res.end_time,
                        res.alpha_history, res.edge_counts_history, res.median_weights_history,
-                       res.removal_events, res.edge_mask_history, res.edge_mask_snapshot_iters)
+                       res.edge_mask_history, res.edge_mask_snapshot_iters, res.removal_events)
 
     return res
