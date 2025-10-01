@@ -18,6 +18,7 @@ class DemandsGenerationResultMulti:
     alpha_history: List[float]
     edge_counts_history: List[int]
     median_weights_history: List[float]
+    algo_params: Optional[Dict[str, Any]] = None
 
     # Доп. поля прикрепляются динамически:
     #   removal_events: List[Dict[str, Any]]
@@ -333,4 +334,18 @@ class MCFGeneratorMultiEdges:
         res.removal_events = removal_events
         res.edge_mask_history = edge_mask_history
         res.edge_mask_snapshot_iters = edge_mask_snapshot_iters
+        res.algo_params = {
+            "variant": "multi_edges",
+            "p_ER": self.p_ER,
+            "distribution": self.dist,
+            "median_weight_for_initial": self.median_weight_for_initial,
+            "var_for_initial": self.var_for_initital,
+            "demands_median_denominator": self.median_div,
+            "demands_var_denominator": self.var_div,
+            "num_edges": (self.num_edges_param if self.num_edges_param is not None else int(math.ceil(graph.graph.number_of_nodes() ** 0.25))),
+            "p_for_delete_edge": self.p_for_delete_edge,
+            "p_for_upsert_edge": self.p_for_upsert_edge,
+            "epsilon": self.epsilon,
+            "max_iter": self.max_iter,
+        }
         return res
