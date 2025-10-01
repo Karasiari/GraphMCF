@@ -19,7 +19,7 @@ class DemandsGenerationResultMulti:
     edge_counts_history: List[int]
     median_weights_history: List[float]
 
-    # те же доп-поля, что и раньше — прикрепляем динамически:
+    # Доп. поля прикрепляются динамически:
     #   removal_events: List[Dict[str, Any]]
     #   edge_mask_history: List[np.ndarray]
     #   edge_mask_snapshot_iters: List[int]
@@ -40,11 +40,11 @@ class DemandsGenerationResultMulti:
 class MCFGeneratorMultiEdges:
     """
     Модификация базового генератора:
-      - в КАЖДОЙ внешней итерации выполняем num_edges суб-операций
-      - каждая суб-операция может:
-          * удалить ребро с вероятностью p_for_delete_edge (если удаление возможно)
-          * добавить/усилить ребро с вероятностью p_for_upsert_edge
-      - остальная логика (выбор внутрикластерного min/max, fallback, история) — как в оригинале
+      - в каждой внешней итерации выполняем num_edges суб-операций
+      - каждая суб-операция:
+          * удаляет ребро с вероятностью p_for_delete_edge (если есть подходящее)
+          * добавляет/усиливает ребро с вероятностью p_for_upsert_edge
+      - остальная логика (приоритет внутрикластерных, fallback и история) совпадает с оригиналом
     """
 
     def __init__(
@@ -166,6 +166,8 @@ class MCFGeneratorMultiEdges:
             return (E_alive & same), (E_alive & ~same)
 
         def pick_idx(mask: np.ndarray, E_w: np.ndarray, mode: str) -> Optional[int]:
+            if mask.size == 0 or E_w.size == 0:
+                return None
             if not np.any(mask):
                 return None
             if mode == "min":
@@ -226,7 +228,7 @@ class MCFGeneratorMultiEdges:
 
         it = 0
         for _ in range(max_iter):
-            # метрики на входе итерации
+            # Метрики на входе внешней итерации
             a = graph.calculate_alpha()
             alpha_hist.append(a)
             edges_hist.append(graph.demands_graph.number_of_edges())
@@ -237,19 +239,19 @@ class MCFGeneratorMultiEdges:
             if abs(diff) <= self.epsilon:
                 break
 
-            # считаем один раз cut/side на всю внешнюю итерацию
+            # фиксируем ОДИН разрез (side) на всю внешнюю итерацию
             if diff < -self.epsilon:
                 # adversarial
                 v = graph.generate_cut(type="adversarial")
                 side = self._split_by_median(np.asarray(v, dtype=float))
-                mask_internal, _ = masks_for_cut(side, E_u, E_v, E_alive)
                 V1, V2 = np.flatnonzero(side), np.flatnonzero(~side)
 
                 for _k in range(num_edges):
-                    # УДАЛЕНИЕ (по монетке)
-                    did_delete = False
-                    w_old_for_add = None
+                    # ВАЖНО: маски считаем внутри суб-итерации (после возможных изменений E_*)
+                    mask_internal, _ = masks_for_cut(side, E_u, E_v, E_alive)
 
+                    # УДАЛЕНИЕ (по монетке)
+                    w_old_for_add = None
                     if np.random.rand() < self.p_for_delete_edge:
                         j = pick_idx(mask_internal, E_w, "min") or pick_idx(E_alive, E_w, "min")
                         if j is not None:
@@ -257,20 +259,17 @@ class MCFGeneratorMultiEdges:
                             removed = remove_by_idx(j, E_u, E_v, E_alive, E_w)
                             if removed is not None:
                                 iu, iv, old = removed
-                                did_delete = True
-                                was_internal = bool(side[iu] == side[iv])
                                 removal_events.append({
                                     "iter": it + 1,
                                     "cut_type": "adversarial",
                                     "iu": int(iu), "iv": int(iv),
                                     "old_weight": float(old) if old is not None else None,
-                                    "was_internal": was_internal,
+                                    "was_internal": bool(side[iu] == side[iv]),
                                 })
 
                     # ДОБАВЛЕНИЕ (по монетке)
                     if np.random.rand() < self.p_for_upsert_edge and V1.size and V2.size:
                         iu = int(np.random.choice(V1)); iv = int(np.random.choice(V2))
-                        # если удаления не было, используем нейтральный порог
                         if w_old_for_add is None:
                             w_old_for_add = float(median_for_weights)
                         delta = self._draw_new_weight(w_old_for_add, ">", median_for_weights, var_for_weights)
@@ -280,14 +279,14 @@ class MCFGeneratorMultiEdges:
                 # friendly
                 v = graph.generate_cut(type="friendly")
                 side = self._split_by_median(np.asarray(v, dtype=float))
-                mask_internal, _ = masks_for_cut(side, E_u, E_v, E_alive)
                 V1, V2 = np.flatnonzero(side), np.flatnonzero(~side)
 
                 for _k in range(num_edges):
-                    # УДАЛЕНИЕ (по монетке)
-                    did_delete = False
-                    w_old_for_add = None
+                    # ВАЖНО: маски считаем внутри суб-итерации (после возможных изменений E_*)
+                    mask_internal, _ = masks_for_cut(side, E_u, E_v, E_alive)
 
+                    # УДАЛЕНИЕ (по монетке)
+                    w_old_for_add = None
                     if np.random.rand() < self.p_for_delete_edge:
                         j = pick_idx(mask_internal, E_w, "max") or pick_idx(E_alive, E_w, "max")
                         if j is not None:
@@ -295,14 +294,12 @@ class MCFGeneratorMultiEdges:
                             removed = remove_by_idx(j, E_u, E_v, E_alive, E_w)
                             if removed is not None:
                                 iu, iv, old = removed
-                                did_delete = True
-                                was_internal = bool(side[iu] == side[iv])
                                 removal_events.append({
                                     "iter": it + 1,
                                     "cut_type": "friendly",
                                     "iu": int(iu), "iv": int(iv),
                                     "old_weight": float(old) if old is not None else None,
-                                    "was_internal": was_internal,
+                                    "was_internal": bool(side[iu] == side[iv]),
                                 })
 
                     # ДОБАВЛЕНИЕ (по монетке)
