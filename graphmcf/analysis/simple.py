@@ -5,13 +5,20 @@ import networkx as nx
 
 def analyze_simple(graph, alpha_target, epsilon, start_time, end_time,
                    alpha_history, edge_counts_history, median_weights_history,
-                   edge_mask_history, edge_mask_snapshot_iters, removal_events):
+                   edge_mask_history, edge_mask_snapshot_iters, removal_events,
+                   algo_params: dict | None = None,):
     print("=== АНАЛИЗ (single run) ===")
     T = end_time - start_time
     a = np.array(alpha_history, dtype=float)
     n_steps = max(0, len(a) - 1)
     dif = a - float(alpha_target)
 
+    if algo_params is not None:
+      ne = algo_params.get("num_edges", None)
+      pdel = algo_params.get("p_for_delete_edge", None)
+      pins = algo_params.get("p_for_upsert_edge", None)
+      print(f"num_edges={ne}, p_for_delete_edge={pdel}, p_for_upsert_edge={pins}")
+                     
     # базовые метрики
     n_nodes = graph.graph.number_of_nodes() if hasattr(graph, "graph") else None
     max_iter = 100 * n_nodes if n_nodes is not None else None
