@@ -104,14 +104,46 @@ def compute_overlap_ratio_mean(edge_mask_history: Optional[List[np.ndarray]]) ->
 
 def compute_internal_removal_ratio(removal_events: Optional[List[Dict[str, Any]]]) -> Optional[float]:
     """
-    Доля внутрикластерных среди всех УДАЛЁННЫХ рёбер.
-    Если нет удалений — вернёт None.
+    (Старая версия) Доля внутрикластерных среди всех УДАЛЁННЫХ рёбер за весь прогон.
+    Оставлено для обратной совместимости.
     """
     if not removal_events:
         return None
     tot = len(removal_events)
     intr = sum(1 for ev in removal_events if bool(ev.get("was_internal", False)))
     return (intr / tot) if tot > 0 else None
+
+def compute_internal_removed_ratio_windowed(removal_events: Optional[List[Dict[str, Any]]],
+                                            window: int = 20) -> Optional[float]:
+    """
+    НОВАЯ метрика (для overall):
+      Для прогона при данном alpha_target берём окна по `window` внешних итераций.
+      В каждом окне k считаем долю:  intr_k / tot_k (если tot_k>0, иначе окно пропускаем),
+      а затем берём среднее по всем окнам, где были удаления.
+
+      Возвращает None, если не было ни одного окна с удалениями.
+    """
+    if not removal_events:
+        return None
+    # сгруппировать по окнам
+    buckets_total: Dict[int, int] = {}
+    buckets_intr: Dict[int, int] = {}
+    for ev in removal_events:
+        it_ev = int(ev.get("iter", 0))
+        if it_ev <= 0:
+            b = 0
+        else:
+            b = (it_ev - 1) // int(window)
+        buckets_total[b] = buckets_total.get(b, 0) + 1
+        if bool(ev.get("was_internal", False)):
+            buckets_intr[b] = buckets_intr.get(b, 0) + 1
+
+    ratios: List[float] = []
+    for b, tot in buckets_total.items():
+        if tot > 0:
+            intr = buckets_intr.get(b, 0)
+            ratios.append(intr / tot)
+    return float(np.mean(ratios)) if ratios else None
 
 # ============================ dataframe utils ===============================
 
@@ -134,6 +166,7 @@ def records_to_dataframe(records: List[Dict[str, Any]]) -> pd.DataFrame:
             "graph_id": r.get("graph_id"),
             "graph_name": r.get("graph_name"),
             "n_nodes": r.get("n_nodes"),
+            "num_edges": r.get("num_edges"),  # для multi_edges (может быть None)
             "alpha_target": r.get("alpha_target"),
             "epsilon": r.get("epsilon"),
             "converged": bool(r.get("converged", False)),
@@ -161,6 +194,7 @@ def print_overall_header_single(df_graph: pd.DataFrame,
     """
     Печатает сводку для ОДНОГО графа (п.1):
       - количество вершин графа
+      - (новое) num_edges, если он задан в данных и не NaN (актуально для multi_edges)
       - выбранный epsilon (если один; иначе множество)
       - среднее initial_alpha по батчу
       - число сошедшихся запусков из всего по батчу
@@ -171,17 +205,24 @@ def print_overall_header_single(df_graph: pd.DataFrame,
         return
 
     n_nodes = int(df_graph["n_nodes"].max()) if "n_nodes" in df_graph else None
+    print(f"\n=== СВОДКА ПО ГРАФУ {title} ===")
+    print(f"Вершины: {n_nodes}")
+
+    # (новое) num_edges для multi_edges, если есть
+    if "num_edges" in df_graph.columns:
+        ne_vals = sorted(set([v for v in df_graph["num_edges"].tolist() if v is not None and not (isinstance(v, float) and np.isnan(v))]))
+        if len(ne_vals) == 1:
+            print(f"num_edges: {ne_vals[0]}")
+        elif len(ne_vals) > 1:
+            print(f"num_edges: {ne_vals}")
+
     epsilons = sorted(set(df_graph["epsilon"].dropna().astype(float).tolist()))
     eps_line = (f"{epsilons[0]}" if len(epsilons) == 1 else f"{epsilons}")
-
     init_alpha_vals = df_graph["initial_alpha"].dropna().astype(float)
     init_alpha_mean = init_alpha_vals.mean() if not init_alpha_vals.empty else float("nan")
-
     conv_count = int(df_graph["converged"].sum())
     total = int(len(df_graph))
 
-    print(f"\n=== СВОДКА ПО ГРАФУ {title} ===")
-    print(f"Вершины: {n_nodes}")
     print(f"epsilon: {eps_line}")
     print(f"Среднее initial_alpha: {init_alpha_mean:.4f}")
     print(f"Сошедшихся запусков: {conv_count} из {total} ({(conv_count/total if total else 0):.2%})")
@@ -199,11 +240,9 @@ def plot_overall_summary_single(df_graph: pd.DataFrame,
         print(f"Нет данных для отрисовки ({title}).")
         return
 
-    # цвет по сходимости
     conv_mask = df_graph["converged"].values
     colors = np.where(conv_mask, "green", "red")
 
-    # отсортируем по alpha_target для линий
     df_sorted = df_graph.sort_values("alpha_target")
     alphas_sorted = df_sorted["alpha_target"].values
 
@@ -212,9 +251,7 @@ def plot_overall_summary_single(df_graph: pd.DataFrame,
 
     def scatter_with_line(ax, ycol, title_local, ylabel, ylim=None):
         yvals = df_sorted[ycol].astype(float).values
-        # линия
         ax.plot(alphas_sorted, yvals, lw=1.8, color="gray", alpha=0.8, zorder=1)
-        # точки
         ax.scatter(df_graph["alpha_target"], df_graph[ycol].astype(float), c=colors, s=46, zorder=2,
                    edgecolor="black", linewidth=0.5)
         ax.set_title(title_local)
@@ -222,38 +259,30 @@ def plot_overall_summary_single(df_graph: pd.DataFrame,
         ax.set_ylabel(ylabel)
         if ylim is not None:
             ax.set_ylim(*ylim)
-        # более плотная сетка
         ax.grid(which="major", alpha=.6)
         ax.grid(which="minor", alpha=.3, linestyle=":")
         ax.minorticks_on()
 
-    # 2) bad_ratio_total
     ax = plt.subplot(2, 3, 1)
     scatter_with_line(ax, "bad_ratio_total", "Доля плохих подгонов", "доля плохих")
 
-    # 3) edges_ratio
     ax = plt.subplot(2, 3, 2)
     scatter_with_line(ax, "edges_ratio", "|E_final| / |E_initial|", "отношение числа рёбер")
 
-    # 4) median_ratio
     ax = plt.subplot(2, 3, 3)
     scatter_with_line(ax, "median_ratio", "median_w(final) / median_w(initial)", "отношение медиан весов")
 
-    # 5) internal_removed_ratio
     ax = plt.subplot(2, 3, 4)
     scatter_with_line(ax, "internal_removed_ratio",
-                      "Доля внутрикластерных удалённых рёбер", "доля внутрикластерных", ylim=(0, 1))
+                      "Доля внутрикластерных удалённых (ср. по окнам 20)", "доля", ylim=(0, 1))
 
-    # 6) mean_overlap_ratio
     ax = plt.subplot(2, 3, 5)
     scatter_with_line(ax, "mean_overlap_ratio",
-                      "Средняя доля общих рёбер (снимки /50 ит.)", "mean_k |E_k ∩ E_{k-1}| / |E_k|", ylim=(0, 1))
+                      "Средняя доля общих рёбер (снимки /50 ит.)", "mean |∩| / |E_k|", ylim=(0, 1))
 
-    # 7) execution_time
     ax = plt.subplot(2, 3, 6)
     scatter_with_line(ax, "execution_time", "Время работы", "секунды")
 
-    # единая легенда по цветам (зелёный = сошёлся, красный = нет)
     import matplotlib.patches as mpatches
     green_patch = mpatches.Patch(color="green", label="сошёлся")
     red_patch = mpatches.Patch(color="red", label="не сошёлся")
@@ -272,7 +301,6 @@ def analyze_overall_for_graph(records_for_graph: List[Dict[str, Any]],
     печатает сводку и рисует 6 графиков. Возвращает DataFrame.
     """
     df_g = records_to_dataframe(records_for_graph)
-    # проставим id/name, если вдруг нет
     if not df_g.empty:
         if "graph_id" not in df_g or df_g["graph_id"].isna().any():
             df_g["graph_id"] = int(graph_id)
