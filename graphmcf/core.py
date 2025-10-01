@@ -185,9 +185,9 @@ class GraphMCF:
         Lg_inv_sqrt = self._ensure_graph_pinv_sqrt()
         L_alpha = Lg_inv_sqrt @ Ld @ Lg_inv_sqrt
         # наибольший собственный
-        #eig, _ = eigsh(L_alpha, k=1, which="LA")
-        #lam_max = float(eig[0]) if eig.size else 0.0
-        lam_max = float(np.linalg.eigvalsh(L_alpha)[-1]) if L_alpha.size else 0.0
+        eig, _ = eigsh(L_alpha, k=1, which="LA")
+        lam_max = float(eig[0]) if eig.size else 0.0
+        #lam_max = float(np.linalg.eigvalsh(L_alpha)[-1]) if L_alpha.size else 0.0
         tr = float(np.trace(L_alpha))
         return lam_max / tr if tr != 0.0 else float("inf")
 
