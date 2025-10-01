@@ -1,2 +1,2 @@
 from .mcf_generator import MCFGenerator, DemandsGenerationResult
-from .mcf_generator import MCFGeneratorMultiEdges, DemandsGenerationResultMulti
+from .mcf_generator_multi_edges import MCFGeneratorMultiEdges, DemandsGenerationResultMulti
