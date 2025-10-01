@@ -6,7 +6,7 @@ from ..core import GraphMCF
 from ..demands import MCFGenerator, DemandsGenerationResult
 from ..analysis.overall import (
     pack_overall_dict,
-    compute_internal_removal_ratio,
+    compute_internal_removed_ratio_windowed,   # окно по 20 внешних итераций
     compute_overlap_ratio_mean,
     analyze_overall_for_graph,
 )
@@ -14,21 +14,14 @@ from ..analysis.overall import (
 class GraphMCFBatch:
     """
     Пакетные прогоны по коллекции графов.
-    Можно передать список имён графов. Если имён меньше/нет — сгенерируем g0, g1, ...
-    Новые параметры начальной генерации demands передаются в генератор через **gen_kwargs:
-      - p_ER: float = 0.5
-      - distribution: str = "normal"
-      - median_weight_for_initial: int = 50
-      - var_for_initial: int = 100
-    Пример:
-        batch.run_mcf_over_per_graph(
-            alphas,
-            epsilon=0.05,
-            p_ER=0.6,
-            distribution="normal",
-            median_weight_for_initial=40,
-            var_for_initial=120,
-        )
+
+    Можно передать:
+      - список матриц смежности или GraphMCF;
+      - список имён графов (необязательно; если меньше — дополним g0, g1, ...).
+
+    Все параметры генератора передаются через **gen_kwargs.
+    По умолчанию используется базовый MCFGenerator; для multi-edges можно передать
+    готовый генератор: generator=MCFGeneratorMultiEdges(...).
     """
 
     def __init__(
@@ -61,10 +54,9 @@ class GraphMCFBatch:
         Прогоняет один граф по всем alpha_values, собирает records и
         сразу выводит сводку/графики для этого графа.
         """
-        # Если генератор не передан — создаём с **gen_kwargs (в т.ч. p_ER, distribution, median/var)
         gen = generator or MCFGenerator(**gen_kwargs)
-
         recs: List[Dict[str, Any]] = []
+
         for a in alpha_values:
             res: DemandsGenerationResult = gen.generate(graph=g, alpha_target=float(a), analysis_mode=None)
 
@@ -79,19 +71,29 @@ class GraphMCFBatch:
                 median_weights_history=res.median_weights_history,
             )
 
+            # общие идентификаторы
             base["graph_id"] = int(gid)
             base["graph_name"] = str(gname) if gname is not None else f"g{gid}"
             base["n_nodes"] = int(g.graph.number_of_nodes())
-            base["internal_removed_ratio"] = compute_internal_removal_ratio(
-                getattr(res, "removal_events", None)
+
+            # доля внутрикластерных (НОВАЯ логика): среднее по окнам 20 итераций
+            base["internal_removed_ratio"] = compute_internal_removed_ratio_windowed(
+                getattr(res, "removal_events", None),
+                window=20
             )
+            # стабильность по снимкам — как было
             base["mean_overlap_ratio"] = compute_overlap_ratio_mean(
                 getattr(res, "edge_mask_history", None)
             )
 
+            # пробрасываем num_edges, если это multi-edges алгоритм
+            algo_params = getattr(res, "algo_params", None)
+            if isinstance(algo_params, dict):
+                ne = algo_params.get("num_edges", None)
+                base["num_edges"] = int(ne) if (ne is not None) else None
+
             recs.append(base)
 
-        # отчёт по этому графу (с названием)
         df_graph = analyze_overall_for_graph(recs, graph_id=gid, graph_name=gname)
         return recs, {"graph_id": gid, "graph_name": gname, "df": df_graph}
 
@@ -103,12 +105,18 @@ class GraphMCFBatch:
     ) -> Dict[str, Any]:
         """
         Идём по графам и для каждого строим сводку/графики по батчу alpha_target.
-        Возвращает:
-          {
-            "all_records": List[Dict[str, Any]],
-            "per_graph_df": Dict[int, pd.DataFrame]
-          }
-        Все параметры генератора (включая контроль initial-демандов) передаются через **gen_kwargs.
+
+        Пример:
+            batch.run_mcf_over_per_graph(
+                alphas,
+                epsilon=0.05,
+                # для базового генератора:
+                p_ER=0.6, distribution="normal",
+                median_weight_for_initial=40, var_for_initial=120,
+                # для добавляемых от capacity:
+                demands_median_denominator=2, demands_var_denominator=4,
+            )
+        Для multi-edges можно передать generator=MCFGeneratorMultiEdges(...).
         """
         all_records: List[Dict[str, Any]] = []
         per_graph_df: Dict[int, Any] = {}
