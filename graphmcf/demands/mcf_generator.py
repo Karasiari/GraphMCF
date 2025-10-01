@@ -319,7 +319,7 @@ class MCFGenerator:
             "p_ER": self.p_ER,
             "distribution": self.dist,
             "median_weight_for_initial": self.median_weight_for_initial,
-            "var_for_initial": self.var_for_initital,
+            "var_for_initial": self.var_for_initial,
             "demands_median_denominator": self.median_div,
             "demands_var_denominator": self.var_div,
             "epsilon": self.epsilon,
