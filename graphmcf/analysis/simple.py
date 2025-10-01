@@ -17,7 +17,8 @@ def analyze_simple(graph, alpha_target, epsilon, start_time, end_time,
       ne = algo_params.get("num_edges", None)
       pdel = algo_params.get("p_for_delete_edge", None)
       pins = algo_params.get("p_for_upsert_edge", None)
-      print(f"num_edges={ne}, p_for_delete_edge={pdel}, p_for_upsert_edge={pins}")
+      if algo_params.get("variant", "simple") == "multi_edges": 
+        print(f"num_edges={ne}, p_for_delete_edge={pdel}, p_for_upsert_edge={pins}")
                      
     # базовые метрики
     n_nodes = graph.graph.number_of_nodes() if hasattr(graph, "graph") else None
