@@ -57,12 +57,19 @@ class GravitationalGenerator:
     def __init__(self,
                  beta: float = 0.5,
                  intensity: int = 100,
-                 centrality: str = "degree") -> None:
+                 centrality: str = "degree",
+                 pagerank_alpha: float = 0.85,
+                 pagerank_tol: float = 1e-8,
+                 pagerank_max_iter: int = 100) -> None:
         assert 0.0 <= beta <= 1.0, "beta ∈ [0,1]"
         assert intensity >= 0, "intensity должен быть неотрицательным"
         self.beta = float(beta)
         self.intensity = int(intensity)
         self.centrality = str(centrality)
+
+        self.pagerank_alpha = float(pagerank_alpha)
+        self.pagerank_tol = float(pagerank_tol)
+        self.pagerank_max_iter = int(pagerank_max_iter)
 
     # ---------------------------------------------------------------------
     # Публичный запуск
@@ -138,28 +145,62 @@ class GravitationalGenerator:
     # ---------------------------------------------------------------------
     # ХУКИ / вспомогательные методы
     # ---------------------------------------------------------------------
-    def _compute_masses(self, graph: GraphMCF, nodes: List[int], centrality: str) -> np.ndarray:
-        """
-        Возвращает вектор масс m_i для вершин в порядке `nodes`.
-        ШАБЛОН:
-          - 'degree' (по умолчанию): неориентированная не-взвешенная степень на capacity-графе graph.graph
-          - другие варианты можно добавлять ('closeness', 'betweenness', ...)
-        """
-        G = graph.graph  # capacity-граф
-        n = len(nodes)
-        masses = np.ones(n, dtype=float)  # дефолт — всё по 1 (не нули, чтобы избежать нулевых мер)
+    def _compute_masses(self, graph: GraphMCF, nodes: list[int], centrality: str) -> np.ndarray:
+         """
+         Возвращает вектор масс m_i для вершин в порядке `nodes`.
 
-        if centrality.lower() == "degree":
-            # невзвешенная степень
+         Поддерживаемые варианты:
+           - 'degree'               : невзвешенная степень на capacity-графе graph.graph
+           - 'closeness'            : closeness centrality (wf_improved=True при наличии)
+           - 'harmonic_closeness'   : harmonic centrality (устойчив к несвязности)
+           - 'pagerank'             : PageRank с параметрами (alpha, tol, max_iter)
+
+        Политика eps:
+           • НЕ клиппим, если все значения строго > 0.
+           • Если встречаются нули (разреженность/несвязность), ТОЛЬКО нули поднимаем до eps,
+             остальные значения не трогаем (для сохранения точности).
+        """
+        import networkx as nx
+        import numpy as np
+
+        G = graph.graph
+        ckey = str(centrality).lower().strip()
+        n = len(nodes)
+        eps = 1e-12  # применяется только к нулям, если они есть
+
+        if ckey == "degree":
             deg = dict(G.degree())
-            masses = np.array([float(deg.get(u, 0)) for u in nodes], dtype=float)
-            # чтобы не было нулей (иначе половина мер станет нулями)
-            masses = np.clip(masses, 1.0, None)
+            masses = np.array([float(deg.get(u, 0.0)) for u in nodes], dtype=float)
+
+        elif ckey == "closeness":
+            try:
+                c = nx.closeness_centrality(G, wf_improved=True)
+            except TypeError:
+                c = nx.closeness_centrality(G)
+         masses = np.array([float(c.get(u, 0.0)) for u in nodes], dtype=float)
+
+        elif ckey in ("harmonic_closeness", "harmonic"):
+            c = nx.harmonic_centrality(G)
+            masses = np.array([float(c.get(u, 0.0)) for u in nodes], dtype=float)
+
+        elif ckey == "pagerank":
+            # PageRank > 0 для всех вершин при alpha<1 (за счёт телепортации)
+            pr = nx.pagerank(G,
+                              alpha=self.pagerank_alpha,
+                              tol=self.pagerank_tol,
+                              max_iter=self.pagerank_max_iter)
+            masses = np.array([float(pr.get(u, 0.0)) for u in nodes], dtype=float)
+
         else:
-            # TODO: позднее добавить разные типы centrality
-            # сейчас — безопасный fallback: степени как минимум 1
+            # безопасный fallback: degree
             deg = dict(G.degree())
-            masses = np.array([max(1.0, float(deg.get(u, 0))) for u in nodes], dtype=float)
+            masses = np.array([float(deg.get(u, 0.0)) for u in nodes], dtype=float)
+
+        # «умный eps»: только если встречаются нули — поднимем именно их
+        if np.any(masses <= 0.0):
+            mask_zero = (masses <= 0.0)
+            masses = masses.copy()
+            masses[mask_zero] = eps
 
         return masses
 
