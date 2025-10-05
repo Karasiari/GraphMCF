@@ -111,9 +111,6 @@ class GravitationalGenerator:
 
         # сохранить
         graph.demands_graph = Gd
-        # при желании можем обновить кэш лапласиана
-        if hasattr(graph, "_recompute_demands_laplacian"):
-            graph._recompute_demands_laplacian()
         # сохранить параметры
         algo_params = {
             "variant": "gravity",
