@@ -82,16 +82,27 @@ class GravitationalGenerator:
         a_probs = self._normalize_to_probs(a_measures)
 
         # === (НОВОЕ) отбор топ-K пар ===
-        if self.edge_perc < 1.0 and g_probs.size > 0:
+        if self.edge_perc < 1.0 and g_probs.size:
             M = g_probs.size
             K = max(1, int(np.ceil(self.edge_perc * M)))
 
-            # топы по каждой модели:
-            top_g_idx = np.argpartition(g_probs, -K)[-K:]
-            top_a_idx = np.argpartition(a_probs, -K)[-K:]
-            mask = np.zeros(M, dtype=bool)
-            mask[top_g_idx] = True
-            mask[top_a_idx] = True  # объединение сильных по любой модели
+            beta = float(self.beta)
+            tol = 1e-12
+            if beta <= tol:
+                top_idx = mp.argpartition(g_probs, -K)[-K:]
+                mask = np.zeros(M, dtype=bool)
+                mask[top_idx] = True
+            elif beta >= 1.0 - tol:
+                top_idx = mp.argpartition(a_probs, -K)[-K:]
+                mask = np.zeros(M, dtype=bool)
+                mask[top_idx] = True
+            else:
+                # топы по каждой модели:
+                top_g_idx = np.argpartition(g_probs, -(K//2))[-(K//2):]
+                top_a_idx = np.argpartition(a_probs, -(K//2))[-(K//2):]
+                mask = np.zeros(M, dtype=bool)
+                mask[top_g_idx] = True
+                mask[top_a_idx] = True  # объединение сильных по любой модели
 
             # зануляем вне топа и перенормируем внутри
             g_probs = self._mask_and_renorm(g_probs, mask)
