@@ -89,11 +89,11 @@ class GravitationalGenerator:
             beta = float(self.beta)
             tol = 1e-12
             if beta <= tol:
-                top_idx = mp.argpartition(g_probs, -K)[-K:]
+                top_idx = np.argpartition(g_probs, -K)[-K:]
                 mask = np.zeros(M, dtype=bool)
                 mask[top_idx] = True
             elif beta >= 1.0 - tol:
-                top_idx = mp.argpartition(a_probs, -K)[-K:]
+                top_idx = np.argpartition(a_probs, -K)[-K:]
                 mask = np.zeros(M, dtype=bool)
                 mask[top_idx] = True
             else:
