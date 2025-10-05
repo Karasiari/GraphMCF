@@ -146,19 +146,19 @@ class GravitationalGenerator:
     # ХУКИ / вспомогательные методы
     # ---------------------------------------------------------------------
     def _compute_masses(self, graph: GraphMCF, nodes: list[int], centrality: str) -> np.ndarray:
-         """
-         Возвращает вектор масс m_i для вершин в порядке `nodes`.
+        """
+        Возвращает вектор масс m_i для вершин в порядке `nodes`.
 
-         Поддерживаемые варианты:
-           - 'degree'               : невзвешенная степень на capacity-графе graph.graph
-           - 'closeness'            : closeness centrality (wf_improved=True при наличии)
-           - 'harmonic_closeness'   : harmonic centrality (устойчив к несвязности)
-           - 'pagerank'             : PageRank с параметрами (alpha, tol, max_iter)
+        Поддерживаемые варианты:
+          - 'degree'               : невзвешенная степень на capacity-графе graph.graph
+          - 'closeness'            : closeness centrality (wf_improved=True при наличии)
+          - 'harmonic_closeness'   : harmonic centrality (устойчив к несвязности)
+          - 'pagerank'             : PageRank с параметрами (alpha, tol, max_iter)
 
         Политика eps:
            • НЕ клиппим, если все значения строго > 0.
            • Если встречаются нули (разреженность/несвязность), ТОЛЬКО нули поднимаем до eps,
-             остальные значения не трогаем (для сохранения точности).
+            остальные значения не трогаем (для сохранения точности).
         """
         import networkx as nx
         import numpy as np
@@ -177,7 +177,7 @@ class GravitationalGenerator:
                 c = nx.closeness_centrality(G, wf_improved=True)
             except TypeError:
                 c = nx.closeness_centrality(G)
-         masses = np.array([float(c.get(u, 0.0)) for u in nodes], dtype=float)
+            masses = np.array([float(c.get(u, 0.0)) for u in nodes], dtype=float)
 
         elif ckey in ("harmonic_closeness", "harmonic"):
             c = nx.harmonic_centrality(G)
