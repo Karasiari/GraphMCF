@@ -66,7 +66,8 @@ class MCFGeneratorMultiGraph:
         p_ER: float = 0.5,
         distribution: str = "normal",
         median_weight_for_initial: int = 50,
-        var_for_initial: int = 100,
+        var_for_initial: int = 25,
+        multi_max: int = 25,
         # --- скорость сходимости ---
         num_edges: Optional[int] = None,   # если None -> ceil(n ** 0.25)
         # ---
