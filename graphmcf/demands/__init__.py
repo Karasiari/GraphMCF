@@ -1,3 +1,4 @@
 from .mcf_generator import MCFGenerator, DemandsGenerationResult
 from .mcf_generator_multi_edges import MCFGeneratorMultiEdges, DemandsGenerationResultMulti
 from .gravitational_generator import GravitationalGenerator, DemandsGenerationResultGravity
+from .mcf_generator_multigraph import MCFGeneratorMultiGraph, DemandsGenerationResultMultiGraph
