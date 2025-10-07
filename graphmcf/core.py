@@ -182,7 +182,7 @@ class GraphMCF:
 
         # подготовка графов
         nodes = list(self.graph.nodes())
-        self.demands_multigraph = _nx.MultiGraph()
+        self.demands_multigraph = nx.MultiGraph()
         self.demands_multigraph.add_nodes_from(nodes)
 
         self.demands_graph = nx.Graph()
