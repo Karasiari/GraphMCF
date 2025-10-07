@@ -22,7 +22,7 @@ class DemandsGenerationResultMulti:
     median_weights_history: List[float]
     algo_params: Optional[Dict[str, Any]] = None
 
-    # динамически добавляемые поля:
+    # динамические поля (добавляются ниже):
     #   removal_events: List[Dict[str, Any]]
     #   weight_update_events: List[Dict[str, Any]]
     #   edge_mask_history: List[np.ndarray]
@@ -41,25 +41,23 @@ class MCFGeneratorMultiEdges:
     """
     Много-рёберная модификация базового генератора.
 
-    Обычный режим (несинхронный):
-      • в каждой внешней итерации — num_edges суб-операций;
-      • каждая суб-операция по монеткам выполняет update_old + update_new;
+    Обычный (несинхронный) режим:
+      • в каждой внешней итерации выполняем num_edges под-операций;
+      • каждая под-операция по монеткам выполняет update_old + update_new;
       • update_old ∈ {'delete','reduce_weight','change_weight'}
       • update_new ∈ {'upsert','upsert_nonexist'}
 
     Синхронный режим:
-      • если update_type_old == update_type_new == 'replace_weight' —
-        запускаем ОСОБУЮ ветку без монеток: в каждой суб-операции списываем дельту
-        с выбранного ребра и ровно эту же дельту добавляем на новое ребро.
-      • если только один из типов равен 'replace_weight' — печатаем предупреждение и
-        НЕ запускаем процесс (возвращаем результат после инициализации).
+      • если update_type_old == update_type_new == 'replace_weight' — отдельная ветка БЕЗ монеток:
+        в каждой под-операции списываем дельту со старого ребра и ту же дельту прибавляем на новом;
+      • если только один тип равен 'replace_weight' — предупреждение и возврат после инициализации.
     """
 
     def __init__(
         self,
         *,
         epsilon: float = 0.05,
-        # --- контроль initial-генерации demands (ER + веса) ---
+        # --- initial-demands (ER + weights) ---
         p_ER: float = 0.5,
         distribution: str = "normal",
         median_weight_for_initial: int = 50,
@@ -69,8 +67,8 @@ class MCFGeneratorMultiEdges:
         demands_var_denominator: int = 2,
         # --- много-рёберные настройки ---
         num_edges: Optional[int] = None,         # если None -> ceil(n ** 0.25)
-        p_for_delete_edge: float = 1.0,          # "монетка" перед update_old (в обычном режиме)
-        p_for_upsert_edge: float = 1.0,          # "монетка" перед update_new (в обычном режиме)
+        p_for_delete_edge: float = 1.0,          # монетка перед update_old (обычный режим)
+        p_for_upsert_edge: float = 1.0,          # монетка перед update_new (обычный режим)
         # --- типы операций ---
         update_type_old: str = "delete",         # 'delete'|'reduce_weight'|'change_weight'|'replace_weight'
         update_type_new: str = "upsert",         # 'upsert'|'upsert_nonexist'|'replace_weight'
@@ -85,7 +83,7 @@ class MCFGeneratorMultiEdges:
         self.median_weight_for_initial = int(median_weight_for_initial)
         self.var_for_initial = int(var_for_initial)
 
-        # добавляемые рёбра: параметры от capacity
+        # параметры добавляемых рёбер от capacity
         self.median_div = int(demands_median_denominator)
         self.var_div = int(demands_var_denominator)
 
@@ -109,7 +107,7 @@ class MCFGeneratorMultiEdges:
         if self.update_type_new not in ok_new:
             raise ValueError(f"update_type_new must be one of {ok_new}, got {self.update_type_new!r}")
 
-    # ---------------------- служебные методы ----------------------
+    # ---------------------- utils ----------------------
 
     def _split_by_median(self, vec: np.ndarray) -> np.ndarray:
         med = float(np.median(vec))
@@ -170,7 +168,7 @@ class MCFGeneratorMultiEdges:
             E_alive = np.append(E_alive, True)
             return E_u, E_v, E_alive, E_w, j, new_w
 
-    # --- истории изменений ---
+    # --- истории ---
 
     @staticmethod
     def _log_removal(removal_events: List[Dict[str, Any]],
@@ -256,10 +254,8 @@ class MCFGeneratorMultiEdges:
             return (E_alive & same), (E_alive & ~same)
 
         def pick_idx(mask: np.ndarray, E_w: np.ndarray, mode: str) -> Optional[int]:
-            if mask.size == 0 or E_w.size == 0:
-                return None
-            if not np.any(mask):
-                return None
+            if mask.size == 0 or E_w.size == 0: return None
+            if not np.any(mask): return None
             if mode == "min":
                 w = np.where(mask, E_w, np.inf); val = w.min()
                 if not np.isfinite(val): return None
@@ -293,7 +289,7 @@ class MCFGeneratorMultiEdges:
         # заранее объявим it, чтобы вложенные функции могли ссылаться
         it = 0
 
-        # ----------------- вспомогательные операции для обычного режима -----------------
+        # ----------------- операции для обычного режима -----------------
 
         def _do_update_old(j: Optional[int], *,
                            cut_type: str,
@@ -317,21 +313,22 @@ class MCFGeneratorMultiEdges:
 
             if update_type == "reduce_weight":
                 delta = float(self._draw_new_weight(old_w, "<", median_for_weights, var_for_weights))
+                # решаем об удалении ДО модификации графа
                 if old_w - delta <= 0:
                     removed = self._remove_by_idx(j, graph, E_u, E_v, E_alive, E_w)
                     if removed is not None:
                         iu2, iv2, old = removed
                         self._log_removal(removal_events, it + 1, cut_type, iu2, iv2, old, was_internal)
                     return old_w
-                else:
-                     E_u2, E_v2, E_alive2, E_w2, j2, new_w = self._upsert_pair(
-                         iu, iv, -delta, graph, E_u, E_v, E_alive, E_w, eid
-                     )
-                     E_u, E_v, E_alive, E_w = E_u2, E_v2, E_alive2, E_w2
-                     self._log_weight_update(weight_update_events, it + 1, cut_type,
-                                             "reduce", iu, iv, old_w, -delta, new_w, was_internal)
-                     return old_w
-                    
+                # частичное уменьшение
+                E_u2, E_v2, E_alive2, E_w2, j2, new_w = self._upsert_pair(
+                    iu, iv, -delta, graph, E_u, E_v, E_alive, E_w, eid
+                )
+                E_u, E_v, E_alive, E_w = E_u2, E_v2, E_alive2, E_w2
+                self._log_weight_update(weight_update_events, it + 1, cut_type,
+                                        "reduce", iu, iv, old_w, -delta, new_w, was_internal)
+                return old_w
+
             if update_type == "change_weight":
                 if cut_type == "friendly":
                     return _do_update_old(j, cut_type=cut_type, update_type="reduce_weight", side_mask=side_mask)
@@ -382,16 +379,16 @@ class MCFGeneratorMultiEdges:
                                     old_weight=None, delta=+delta, new_weight=new_w,
                                     was_internal=False)
 
-        # --------------------------- ВЕТВЛЕНИЕ ПО РЕЖИМУ ---------------------------
+        # --------------------------- ветвление по режиму ---------------------------
 
         sync_replace = (self.update_type_old == "replace_weight" and
                         self.update_type_new == "replace_weight")
         replace_mismatch = ((self.update_type_old == "replace_weight") ^
                             (self.update_type_new == "replace_weight"))
 
-        # === (A) Конфигурация несинхронная для replace_weight → не запускаем ===
+        # (A) несинхронная конфигурация replace_weight — не запускаем
         if replace_mismatch:
-            print("[MCFGeneratorMultiEdges] WARN: Для синхронного режима необходимо "
+            print("[MCFGeneratorMultiEdges] WARN: Для синхронного режима требуется "
                   "update_type_old == update_type_new == 'replace_weight'. Запуск отменён.")
             a0 = graph.calculate_alpha()
             alpha_hist.append(a0)
@@ -433,7 +430,7 @@ class MCFGeneratorMultiEdges:
             res.edge_mask_snapshot_iters = edge_mask_snapshot_iters
             return res
 
-        # === (B) СИНХРОННЫЙ РЕЖИМ: replace_weight без монеток ===
+        # (B) синхронный режим: replace_weight без монеток
         if sync_replace:
             for _ in range(max_iter):
                 a = graph.calculate_alpha()
@@ -462,22 +459,24 @@ class MCFGeneratorMultiEdges:
                         was_internal = bool(side[iu_old] == side[iv_old])
                         old_w = float(E_w[j_old])
                         delta = float(self._draw_new_weight(old_w, "<", median_for_weights, var_for_weights))
+
+                        # удаляем полностью или уменьшаем
                         if old_w - delta <= 0:
                             removed = self._remove_by_idx(j_old, graph, E_u, E_v, E_alive, E_w)
                             if removed is not None:
                                 iu2, iv2, old = removed
-                                self._log_removal(removal_events, it + 1, cut_type, iu2, iv2, old,
-                                                  was_internal=bool(side[iu2] == side[iv2]))
+                                self._log_removal(removal_events, it + 1, "adversarial", iu2, iv2, old, was_internal)
                         else:
                             E_u2, E_v2, E_alive2, E_w2, j2, new_w_old = self._upsert_pair(
                                 iu_old, iv_old, -delta, graph, E_u, E_v, E_alive, E_w, eid
                             )
                             E_u, E_v, E_alive, E_w = E_u2, E_v2, E_alive2, E_w2
-                            self._log_weight_update(weight_update_events, it + 1, cut_type,
+                            self._log_weight_update(weight_update_events, it + 1, "adversarial",
                                                     "replace_reduce", iu_old, iv_old,
                                                     old_weight=old_w, delta=-delta, new_weight=new_w_old,
-                                                    was_internal=bool(side[iu_old] == side[iv_old]))
+                                                    was_internal=was_internal)
 
+                        # прибавляем ту же дельту на новом ребре
                         iu_new = int(np.random.choice(V1)); iv_new = int(np.random.choice(V2))
                         E_u2, E_v2, E_alive2, E_w2, j_new, new_w_new = self._upsert_pair(
                             iu_new, iv_new, +delta, graph, E_u, E_v, E_alive, E_w, eid
@@ -504,21 +503,21 @@ class MCFGeneratorMultiEdges:
                         was_internal = bool(side[iu_old] == side[iv_old])
                         old_w = float(E_w[j_old])
                         delta = float(self._draw_new_weight(old_w, "<", median_for_weights, var_for_weights))
+
                         if old_w - delta <= 0:
                             removed = self._remove_by_idx(j_old, graph, E_u, E_v, E_alive, E_w)
                             if removed is not None:
                                 iu2, iv2, old = removed
-                                self._log_removal(removal_events, it + 1, cut_type, iu2, iv2, old,
-                                                  was_internal=bool(side[iu2] == side[iv2]))
+                                self._log_removal(removal_events, it + 1, "friendly", iu2, iv2, old, was_internal)
                         else:
                             E_u2, E_v2, E_alive2, E_w2, j2, new_w_old = self._upsert_pair(
                                 iu_old, iv_old, -delta, graph, E_u, E_v, E_alive, E_w, eid
                             )
                             E_u, E_v, E_alive, E_w = E_u2, E_v2, E_alive2, E_w2
-                            self._log_weight_update(weight_update_events, it + 1, cut_type,
+                            self._log_weight_update(weight_update_events, it + 1, "friendly",
                                                     "replace_reduce", iu_old, iv_old,
                                                     old_weight=old_w, delta=-delta, new_weight=new_w_old,
-                                                    was_internal=bool(side[iu_old] == side[iv_old]))
+                                                    was_internal=was_internal)
 
                         iu_new = int(np.random.choice(V1)); iv_new = int(np.random.choice(V2))
                         E_u2, E_v2, E_alive2, E_w2, j_new, new_w_new = self._upsert_pair(
@@ -570,7 +569,7 @@ class MCFGeneratorMultiEdges:
             res.edge_mask_snapshot_iters = edge_mask_snapshot_iters
             return res
 
-        # === (C) Обычный (несинхронный) режим ===
+        # (C) Обычный (несинхронный) режим
         for _ in range(max_iter):
             a = graph.calculate_alpha()
             alpha_hist.append(a)
@@ -670,5 +669,4 @@ class MCFGeneratorMultiEdges:
         res.weight_update_events = weight_update_events
         res.edge_mask_history = edge_mask_history
         res.edge_mask_snapshot_iters = edge_mask_snapshot_iters
-        return res
-        
+        return res        
