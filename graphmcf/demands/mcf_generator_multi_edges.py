@@ -29,7 +29,6 @@ class DemandsGenerationResultMulti:
     #   edge_mask_snapshot_iters: List[int]
 
     def to_dict(self) -> Dict[str, Any]:
-        # при желании можно связать с общим pack_overall_dict
         return {
             "alpha_target": self.alpha_target,
             "epsilon": self.epsilon,
@@ -318,11 +317,12 @@ class MCFGeneratorMultiEdges:
 
             if update_type == "reduce_weight":
                 delta = float(self._draw_new_weight(old_w, "<", median_for_weights, var_for_weights))
+                new_w_est = old_w - delta  # <-- ключевая правка: решаем об удалении по old_w - delta
                 E_u2, E_v2, E_alive2, E_w2, j2, new_w = self._upsert_pair(
                     iu, iv, -delta, graph, E_u, E_v, E_alive, E_w, eid
                 )
                 E_u, E_v, E_alive, E_w = E_u2, E_v2, E_alive2, E_w2
-                if new_w <= 0:
+                if new_w_est <= 0:
                     E_alive[j] = False
                     self._log_removal(removal_events, it + 1, cut_type, iu, iv, old_w, was_internal)
                 else:
@@ -391,7 +391,6 @@ class MCFGeneratorMultiEdges:
         if replace_mismatch:
             print("[MCFGeneratorMultiEdges] WARN: Для синхронного режима необходимо "
                   "update_type_old == update_type_new == 'replace_weight'. Запуск отменён.")
-            # минимальная сводка после инициализации:
             a0 = graph.calculate_alpha()
             alpha_hist.append(a0)
             edges_hist.append(graph.demands_graph.number_of_edges())
@@ -426,7 +425,6 @@ class MCFGeneratorMultiEdges:
                     "max_iter": self.max_iter,
                 }
             )
-            # прикладываем истории (пока пустые, кроме снимка 0)
             res.removal_events = []
             res.weight_update_events = []
             res.edge_mask_history = edge_mask_history
@@ -447,28 +445,27 @@ class MCFGeneratorMultiEdges:
                     break
 
                 if diff < -self.epsilon:
-                    # adversarial: выбираем внутреннее ребро с МИН весом
+                    # adversarial
                     v = graph.generate_cut(type="adversarial")
                     side = self._split_by_median(np.asarray(v, dtype=float))
                     V1, V2 = np.flatnonzero(side), np.flatnonzero(~side)
 
                     for _k in range(num_edges):
-                        mask_internal, _mask_cross = masks_for_cut(side, E_u, E_v, E_alive)
-
+                        mask_internal, _ = masks_for_cut(side, E_u, E_v, E_alive)
                         j_old = pick_idx(mask_internal, E_w, "min") or pick_idx(E_alive, E_w, "min")
                         if j_old is None or V1.size == 0 or V2.size == 0:
                             continue
 
-                        # списываем дельту со старого
                         iu_old, iv_old = int(E_u[j_old]), int(E_v[j_old])
                         was_internal = bool(side[iu_old] == side[iv_old])
                         old_w = float(E_w[j_old])
                         delta = float(self._draw_new_weight(old_w, "<", median_for_weights, var_for_weights))
+                        new_w_est = old_w - delta  # <-- ключевая правка
                         E_u2, E_v2, E_alive2, E_w2, j2, new_w_old = self._upsert_pair(
                             iu_old, iv_old, -delta, graph, E_u, E_v, E_alive, E_w, eid
                         )
                         E_u, E_v, E_alive, E_w = E_u2, E_v2, E_alive2, E_w2
-                        if new_w_old <= 0:
+                        if new_w_est <= 0:
                             E_alive[j_old] = False
                             self._log_removal(removal_events, it + 1, "adversarial", iu_old, iv_old, old_w, was_internal)
                         else:
@@ -477,10 +474,7 @@ class MCFGeneratorMultiEdges:
                                                     old_weight=old_w, delta=-delta, new_weight=new_w_old,
                                                     was_internal=was_internal)
 
-                        # прибавляем ту же дельту на новом
                         iu_new = int(np.random.choice(V1)); iv_new = int(np.random.choice(V2))
-                        if iu_new > iv_new:
-                            iu_new, iv_new = iv_new, iu_new
                         E_u2, E_v2, E_alive2, E_w2, j_new, new_w_new = self._upsert_pair(
                             iu_new, iv_new, +delta, graph, E_u, E_v, E_alive, E_w, eid
                         )
@@ -491,14 +485,13 @@ class MCFGeneratorMultiEdges:
                                                 was_internal=False)
 
                 else:
-                    # friendly: выбираем внутреннее ребро с МАКС весом
+                    # friendly
                     v = graph.generate_cut(type="friendly")
                     side = self._split_by_median(np.asarray(v, dtype=float))
                     V1, V2 = np.flatnonzero(side), np.flatnonzero(~side)
 
                     for _k in range(num_edges):
-                        mask_internal, _mask_cross = masks_for_cut(side, E_u, E_v, E_alive)
-
+                        mask_internal, _ = masks_for_cut(side, E_u, E_v, E_alive)
                         j_old = pick_idx(mask_internal, E_w, "max") or pick_idx(E_alive, E_w, "max")
                         if j_old is None or V1.size == 0 or V2.size == 0:
                             continue
@@ -507,11 +500,12 @@ class MCFGeneratorMultiEdges:
                         was_internal = bool(side[iu_old] == side[iv_old])
                         old_w = float(E_w[j_old])
                         delta = float(self._draw_new_weight(old_w, "<", median_for_weights, var_for_weights))
+                        new_w_est = old_w - delta  # <-- ключевая правка
                         E_u2, E_v2, E_alive2, E_w2, j2, new_w_old = self._upsert_pair(
                             iu_old, iv_old, -delta, graph, E_u, E_v, E_alive, E_w, eid
                         )
                         E_u, E_v, E_alive, E_w = E_u2, E_v2, E_alive2, E_w2
-                        if new_w_old <= 0:
+                        if new_w_est <= 0:
                             E_alive[j_old] = False
                             self._log_removal(removal_events, it + 1, "friendly", iu_old, iv_old, old_w, was_internal)
                         else:
@@ -521,8 +515,6 @@ class MCFGeneratorMultiEdges:
                                                     was_internal=was_internal)
 
                         iu_new = int(np.random.choice(V1)); iv_new = int(np.random.choice(V2))
-                        if iu_new > iv_new:
-                            iu_new, iv_new = iv_new, iu_new
                         E_u2, E_v2, E_alive2, E_w2, j_new, new_w_new = self._upsert_pair(
                             iu_new, iv_new, +delta, graph, E_u, E_v, E_alive, E_w, eid
                         )
@@ -566,7 +558,6 @@ class MCFGeneratorMultiEdges:
                     "max_iter": self.max_iter,
                 }
             )
-            # истории
             res.removal_events = removal_events
             res.weight_update_events = weight_update_events
             res.edge_mask_history = edge_mask_history
@@ -592,7 +583,7 @@ class MCFGeneratorMultiEdges:
                 V1, V2 = np.flatnonzero(side), np.flatnonzero(~side)
 
                 for _k in range(num_edges):
-                    mask_internal, _mask_cross = masks_for_cut(side, E_u, E_v, E_alive)
+                    mask_internal, _ = masks_for_cut(side, E_u, E_v, E_alive)
 
                     # update_old (по монетке)
                     w_old_for_add = None
@@ -617,7 +608,7 @@ class MCFGeneratorMultiEdges:
                 V1, V2 = np.flatnonzero(side), np.flatnonzero(~side)
 
                 for _k in range(num_edges):
-                    mask_internal, _mask_cross = masks_for_cut(side, E_u, E_v, E_alive)
+                    mask_internal, _ = masks_for_cut(side, E_u, E_v, E_alive)
 
                     w_old_for_add = None
                     if np.random.rand() < self.p_for_delete_edge:
@@ -669,9 +660,9 @@ class MCFGeneratorMultiEdges:
                 "max_iter": self.max_iter,
             }
         )
-        # истории
         res.removal_events = removal_events
         res.weight_update_events = weight_update_events
         res.edge_mask_history = edge_mask_history
         res.edge_mask_snapshot_iters = edge_mask_snapshot_iters
         return res
+        
