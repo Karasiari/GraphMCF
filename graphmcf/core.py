@@ -175,34 +175,27 @@ class GraphMCF:
         median_weight: int = 50,
         var: int = 100,
         multi_max: int = 3,
-        seed: Optional[int] = None,
     ) -> None:
         if distribution != "normal":
             raise ValueError("Пока поддерживается только distribution='normal'")
-        n = self.graph.number_of_nodes()
-        nodes = list(self.graph.nodes())        
-        G_rand = nx.erdos_renyi_graph(n, p, seed=seed, directed=False)
-        # случайная пермутация отображения вершин
-        perm = list(range(n)); random.shuffle(perm)
-        mapping = {i: nodes[perm[i]] for i in G_rand.nodes()}
-        G_rand = nx.relabel_nodes(G_rand, mapping)
-        # веса ~ нормальным образом (дискретно)
         import numpy as np
-        from scipy.stats import norm as _norm
-        def draw():
-            mu, sigma = median_weight, np.sqrt(var)
-            lo, hi = 1, 2 * median_weight
-            xs = np.arange(lo, hi + 1)
-            ps = _norm.pdf(xs, loc=mu, scale=sigma); ps /= ps.sum()
-            return int(np.random.choice(xs, p=ps))
-        Gd = nx.Graph(); Gd.add_nodes_from(nodes)
-        for u, v in G_rand.edges():
-            Gd.add_edge(u, v, weight=draw())
-        self.initial_demands_graph = copy.deepcopy(Gd)
-        self.demands_graph = Gd
 
-        self.demands_multigraph = nx.MultiGraph()
+        # подготовка графов
+        nodes = list(self.graph.nodes())
+        self.demands_multigraph = _nx.MultiGraph()
         self.demands_multigraph.add_nodes_from(nodes)
+
+        self.demands_graph = nx.Graph()
+        self.demands_graph.add_nodes_from(nodes)
+        # дискретная "нормаль" для весов без SciPy
+        mu = float(max(median_weight, 1))
+        sigma = float(np.sqrt(max(var, 1)))
+        hi = int(max(2 * mu, 2))
+        xs = np.arange(1, hi + 1, dtype=int)
+        ps = np.exp(-0.5 * ((xs - mu) / sigma) ** 2)
+        ps_sum = ps.sum()
+        ps = ps / ps_sum if ps_sum > 0 else np.ones_like(ps) / xs.size
+        
         multi_max = int(max(1, multi_max))
         n = len(nodes)
         if n >= 2:
@@ -229,6 +222,7 @@ class GraphMCF:
 
         # сохранить копии начального состояния
         self.initial_demands_multigraph = self.demands_multigraph.copy()
+        self.initial_demands_graph = self.demands_graph.copy()
         self.demands_laplacian = compute_laplacian_matrix(self.demands_graph, nodelist=nodes)
 
     def _ensure_graph_pinv_sqrt(self) -> np.ndarray:
