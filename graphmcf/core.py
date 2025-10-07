@@ -175,6 +175,7 @@ class GraphMCF:
         median_weight: int = 50,
         var: int = 100,
         multi_max: int = 3,
+        seed: Optional[int] = None,
     ) -> None:
         if distribution != "normal":
             raise ValueError("Пока поддерживается только distribution='normal'")
