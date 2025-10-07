@@ -317,19 +317,21 @@ class MCFGeneratorMultiEdges:
 
             if update_type == "reduce_weight":
                 delta = float(self._draw_new_weight(old_w, "<", median_for_weights, var_for_weights))
-                new_w_est = old_w - delta  # <-- ключевая правка: решаем об удалении по old_w - delta
-                E_u2, E_v2, E_alive2, E_w2, j2, new_w = self._upsert_pair(
-                    iu, iv, -delta, graph, E_u, E_v, E_alive, E_w, eid
-                )
-                E_u, E_v, E_alive, E_w = E_u2, E_v2, E_alive2, E_w2
-                if new_w_est <= 0:
-                    E_alive[j] = False
-                    self._log_removal(removal_events, it + 1, cut_type, iu, iv, old_w, was_internal)
+                if old_w - delta <= 0:
+                    removed = self._remove_by_idx(j, graph, E_u, E_v, E_alive, E_w)
+                    if removed is not None:
+                        iu2, iv2, old = removed
+                        self._log_removal(removal_events, it + 1, cut_type, iu2, iv2, old, was_internal)
+                    return old_w
                 else:
-                    self._log_weight_update(weight_update_events, it + 1, cut_type,
-                                            "reduce", iu, iv, old_w, -delta, new_w, was_internal)
-                return old_w
-
+                     E_u2, E_v2, E_alive2, E_w2, j2, new_w = self._upsert_pair(
+                         iu, iv, -delta, graph, E_u, E_v, E_alive, E_w, eid
+                     )
+                     E_u, E_v, E_alive, E_w = E_u2, E_v2, E_alive2, E_w2
+                     self._log_weight_update(weight_update_events, it + 1, cut_type,
+                                             "reduce", iu, iv, old_w, -delta, new_w, was_internal)
+                     return old_w
+                    
             if update_type == "change_weight":
                 if cut_type == "friendly":
                     return _do_update_old(j, cut_type=cut_type, update_type="reduce_weight", side_mask=side_mask)
@@ -460,19 +462,21 @@ class MCFGeneratorMultiEdges:
                         was_internal = bool(side[iu_old] == side[iv_old])
                         old_w = float(E_w[j_old])
                         delta = float(self._draw_new_weight(old_w, "<", median_for_weights, var_for_weights))
-                        new_w_est = old_w - delta  # <-- ключевая правка
-                        E_u2, E_v2, E_alive2, E_w2, j2, new_w_old = self._upsert_pair(
-                            iu_old, iv_old, -delta, graph, E_u, E_v, E_alive, E_w, eid
-                        )
-                        E_u, E_v, E_alive, E_w = E_u2, E_v2, E_alive2, E_w2
-                        if new_w_est <= 0:
-                            E_alive[j_old] = False
-                            self._log_removal(removal_events, it + 1, "adversarial", iu_old, iv_old, old_w, was_internal)
+                        if old_w - delta <= 0:
+                            removed = self._remove_by_idx(j_old, graph, E_u, E_v, E_alive, E_w)
+                            if removed is not None:
+                                iu2, iv2, old = removed
+                                self._log_removal(removal_events, it + 1, cut_type, iu2, iv2, old,
+                                                  was_internal=bool(side[iu2] == side[iv2]))
                         else:
-                            self._log_weight_update(weight_update_events, it + 1, "adversarial",
+                            E_u2, E_v2, E_alive2, E_w2, j2, new_w_old = self._upsert_pair(
+                                iu_old, iv_old, -delta, graph, E_u, E_v, E_alive, E_w, eid
+                            )
+                            E_u, E_v, E_alive, E_w = E_u2, E_v2, E_alive2, E_w2
+                            self._log_weight_update(weight_update_events, it + 1, cut_type,
                                                     "replace_reduce", iu_old, iv_old,
                                                     old_weight=old_w, delta=-delta, new_weight=new_w_old,
-                                                    was_internal=was_internal)
+                                                    was_internal=bool(side[iu_old] == side[iv_old]))
 
                         iu_new = int(np.random.choice(V1)); iv_new = int(np.random.choice(V2))
                         E_u2, E_v2, E_alive2, E_w2, j_new, new_w_new = self._upsert_pair(
@@ -500,19 +504,21 @@ class MCFGeneratorMultiEdges:
                         was_internal = bool(side[iu_old] == side[iv_old])
                         old_w = float(E_w[j_old])
                         delta = float(self._draw_new_weight(old_w, "<", median_for_weights, var_for_weights))
-                        new_w_est = old_w - delta  # <-- ключевая правка
-                        E_u2, E_v2, E_alive2, E_w2, j2, new_w_old = self._upsert_pair(
-                            iu_old, iv_old, -delta, graph, E_u, E_v, E_alive, E_w, eid
-                        )
-                        E_u, E_v, E_alive, E_w = E_u2, E_v2, E_alive2, E_w2
-                        if new_w_est <= 0:
-                            E_alive[j_old] = False
-                            self._log_removal(removal_events, it + 1, "friendly", iu_old, iv_old, old_w, was_internal)
+                        if old_w - delta <= 0:
+                            removed = self._remove_by_idx(j_old, graph, E_u, E_v, E_alive, E_w)
+                            if removed is not None:
+                                iu2, iv2, old = removed
+                                self._log_removal(removal_events, it + 1, cut_type, iu2, iv2, old,
+                                                  was_internal=bool(side[iu2] == side[iv2]))
                         else:
-                            self._log_weight_update(weight_update_events, it + 1, "friendly",
+                            E_u2, E_v2, E_alive2, E_w2, j2, new_w_old = self._upsert_pair(
+                                iu_old, iv_old, -delta, graph, E_u, E_v, E_alive, E_w, eid
+                            )
+                            E_u, E_v, E_alive, E_w = E_u2, E_v2, E_alive2, E_w2
+                            self._log_weight_update(weight_update_events, it + 1, cut_type,
                                                     "replace_reduce", iu_old, iv_old,
                                                     old_weight=old_w, delta=-delta, new_weight=new_w_old,
-                                                    was_internal=was_internal)
+                                                    was_internal=bool(side[iu_old] == side[iv_old]))
 
                         iu_new = int(np.random.choice(V1)); iv_new = int(np.random.choice(V2))
                         E_u2, E_v2, E_alive2, E_w2, j_new, new_w_new = self._upsert_pair(
