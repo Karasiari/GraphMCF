@@ -225,6 +225,89 @@ class GraphMCF:
         self.initial_demands_graph = self.demands_graph.copy()
         self.demands_laplacian = compute_laplacian_matrix(self.demands_graph, nodelist=nodes)
 
+    def generate_deterministic_initial_multidemands(
+        self,
+        *,
+        distribution: str = "normal",
+        median_weight: int = 50,
+        var: int = 100,
+        multi_max: int = 3,
+        demands_sum: float = 1000.0,
+    ) -> None:
+        if distribution != "normal":
+            raise ValueError("Пока поддерживается только distribution='normal'")
+
+        import math
+        import numpy as np
+        import networkx as nx
+
+        nodes = list(self.graph.nodes())
+        self.demands_multigraph = nx.MultiGraph()
+        self.demands_multigraph.add_nodes_from(nodes)
+
+        self.demands_graph = nx.Graph()
+        self.demands_graph.add_nodes_from(nodes)
+
+        # Дискретная "нормаль" без SciPy
+        mu = float(max(int(median_weight), 1))
+        sigma = float(np.sqrt(max(int(var), 1)))
+        hi = int(max(2 * mu, 2))
+        xs = np.arange(1, hi + 1, dtype=int)
+        ps = np.exp(-0.5 * ((xs - mu) / sigma) ** 2)
+        ps_sum = ps.sum()
+        ps = ps / ps_sum if ps_sum > 0 else np.ones_like(ps) / xs.size
+
+        multi_max = int(max(1, int(multi_max)))
+        n = len(nodes)
+        # Все неориентированные пары
+        iu, iv = np.triu_indices(n, k=1)
+        M = iu.size
+
+        # Кол-во пар K (гарантируется, что K < M)
+        K = int(math.ceil(2.0 * float(demands_sum) / max(mu, 1.0)))
+        K = max(1, min(K, M - 1))  # на всякий случай страхуемся (оставим < M)
+
+        # Равномерно выбираем K различных индексов пар и перемешиваем их порядок
+        chosen = np.random.choice(M, size=K, replace=False)
+        order = np.random.permutation(chosen)
+
+        demands_left = float(demands_sum)
+
+        for idx in order:
+            if demands_left <= mu:
+                break
+            
+            i, j = int(iu[idx]), int(iv[idx])
+            u, v = nodes[i], nodes[j]
+
+            # Базовый вес по дискретной "нормали"
+            w = int(np.random.choice(xs, p=ps))
+
+            # Дробление: k мультирёбер веса per; если per==0 → одно ребро веса w
+            k = int(np.random.randint(1, multi_max + 1))
+            per = int(round(w / k))
+
+            if per <= 0:
+                # НЕ дробим
+                self.demands_multigraph.add_edge(u, v, weight=float(w))
+                agg_add = float(w)
+            else:
+                for _ in range(k):
+                    self.demands_multigraph.add_edge(u, v, weight=float(per))
+                agg_add = float(k * per)
+
+            # Агрегированное ребро — сумма мультирёбер на паре
+            self.demands_graph.add_edge(u, v, weight=agg_add)
+
+            # ВЫЧИТАЕМ ИМЕННО agg_add (после округлений/дробления), а не исходный w
+            demands_left -= agg_add
+
+        # сохранить копии начального состояния
+        self.initial_demands_multigraph = self.demands_multigraph.copy()
+        self.initial_demands_graph = self.demands_graph.copy()
+        self.demands_laplacian = compute_laplacian_matrix(self.demands_graph, nodelist=nodes)
+
+
     def _ensure_graph_pinv_sqrt(self) -> np.ndarray:
         if self.graph_pinv_sqrt is None:
             nodelist = list(self.graph.nodes())
