@@ -68,6 +68,8 @@ class MCFGeneratorMultiGraph:
         median_weight_for_initial: int = 50,
         var_for_initial: int = 25,
         multi_max: int = 25,
+        initial_generation: str = 'ER',
+        demands_sum: float = 1000.0,
         # --- скорость сходимости ---
         num_edges: Optional[int] = None,   # если None -> ceil(n ** 0.25)
         # ---
@@ -81,6 +83,8 @@ class MCFGeneratorMultiGraph:
         self.median_weight_for_initial = int(median_weight_for_initial)
         self.var_for_initial = int(var_for_initial)
         self.multi_max = int(multi_max)
+        self.initial_generation = str(initial_generation),
+        self.demands_sum = float(demands_sum),
 
         self.num_edges_param = None if num_edges is None else int(num_edges)
         self.max_iter = max_iter  # если None → 100*|V|
@@ -108,13 +112,22 @@ class MCFGeneratorMultiGraph:
         # ОЖИДАЕМ наличие метода, инициализирующего оба графа:
         #   - graph.demands_multigraph : nx.MultiGraph
         #   - graph.demands_graph      : nx.Graph (агрегат по весам)
-        graph.generate_initial_multidemands(
-            p=self.p_ER,
-            distribution=self.dist,
-            median_weight=self.median_weight_for_initial,
-            var=self.var_for_initial,
-            multi_max=self.multi_max
-        )
+        if self.initial_generation == 'ER':
+            graph.generate_initial_multidemands(
+                    p=self.p_ER,
+                    distribution=self.dist,
+                    median_weight=self.median_weight_for_initial,
+                    var=self.var_for_initial,
+                    multi_max=self.multi_max
+            )
+        elif self.initial_generation == 'deterministic':
+            graph.generate_deterministic_initial_multidemands(
+                    distribution=self.dist,
+                    median_weight=self.median_weight_for_initial,
+                    var=self.var_for_initial,
+                    multi_max=self.multi_max,
+                    demands_sum=self.demands_sum
+            )
         assert isinstance(graph.demands_multigraph, nx.MultiGraph), "demands_multigraph должен быть nx.MultiGraph"
         assert isinstance(graph.demands_graph, nx.Graph), "demands_graph должен быть nx.Graph"
 
@@ -453,6 +466,8 @@ class MCFGeneratorMultiGraph:
                 "median_weight_for_initial": self.median_weight_for_initial,
                 "var_for_initial": self.var_for_initial,
                 "multi_max": self.multi_max,
+                "initial_generation": self.initial_generation,
+                "demands_sum": self.demands_sum,
                 "num_edges": (self.num_edges_param if self.num_edges_param is not None else int(math.ceil(n ** 0.25))),
                 "epsilon": self.epsilon,
                 "max_iter": self.max_iter,
