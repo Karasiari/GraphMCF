@@ -120,6 +120,7 @@ class MCFGeneratorMultiGraph:
                     var=self.var_for_initial,
                     multi_max=self.multi_max
             )
+            print('прошло')
         elif self.initial_generation == 'deterministic':
             graph.generate_deterministic_initial_multidemands(
                     distribution=self.dist,
