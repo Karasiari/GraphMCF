@@ -83,8 +83,8 @@ class MCFGeneratorMultiGraph:
         self.median_weight_for_initial = int(median_weight_for_initial)
         self.var_for_initial = int(var_for_initial)
         self.multi_max = int(multi_max)
-        self.initial_generation = str(initial_generation),
-        self.demands_sum = float(demands_sum),
+        self.initial_generation = str(initial_generation)
+        self.demands_sum = float(demands_sum)
         print(demands_sum, self.demands_sum)
         print(median_weight_for_initial, self.median_weight_for_initial)
 
@@ -114,7 +114,7 @@ class MCFGeneratorMultiGraph:
         # ОЖИДАЕМ наличие метода, инициализирующего оба графа:
         #   - graph.demands_multigraph : nx.MultiGraph
         #   - graph.demands_graph      : nx.Graph (агрегат по весам)
-        if self.initial_generation[0] == 'ER':
+        if self.initial_generation == 'ER':
             graph.generate_initial_multidemands(
                     p=self.p_ER,
                     distribution=self.dist,
@@ -122,7 +122,7 @@ class MCFGeneratorMultiGraph:
                     var=self.var_for_initial,
                     multi_max=self.multi_max
             )
-        elif self.initial_generation[0] == 'deterministic':
+        elif self.initial_generation == 'deterministic':
             graph.generate_deterministic_initial_multidemands(
                     distribution=self.dist,
                     median_weight=self.median_weight_for_initial,
