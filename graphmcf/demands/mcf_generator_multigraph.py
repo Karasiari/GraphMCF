@@ -112,7 +112,7 @@ class MCFGeneratorMultiGraph:
         # ОЖИДАЕМ наличие метода, инициализирующего оба графа:
         #   - graph.demands_multigraph : nx.MultiGraph
         #   - graph.demands_graph      : nx.Graph (агрегат по весам)
-        if self.initial_generation == 'ER':
+        if self.initial_generation[0] == 'ER':
             graph.generate_initial_multidemands(
                     p=self.p_ER,
                     distribution=self.dist,
@@ -120,7 +120,6 @@ class MCFGeneratorMultiGraph:
                     var=self.var_for_initial,
                     multi_max=self.multi_max
             )
-            print('прошло')
         elif self.initial_generation == 'deterministic':
             graph.generate_deterministic_initial_multidemands(
                     distribution=self.dist,
