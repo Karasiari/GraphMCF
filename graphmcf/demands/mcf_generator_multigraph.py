@@ -120,7 +120,7 @@ class MCFGeneratorMultiGraph:
                     var=self.var_for_initial,
                     multi_max=self.multi_max
             )
-        elif self.initial_generation == 'deterministic':
+        elif self.initial_generation[0] == 'deterministic':
             graph.generate_deterministic_initial_multidemands(
                     distribution=self.dist,
                     median_weight=self.median_weight_for_initial,
