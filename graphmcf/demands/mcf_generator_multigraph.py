@@ -85,6 +85,8 @@ class MCFGeneratorMultiGraph:
         self.multi_max = int(multi_max)
         self.initial_generation = str(initial_generation),
         self.demands_sum = float(demands_sum),
+        print(demands_sum, self.demands_sum)
+        print(median_weight_for_initial, self.median_weight_for_initial)
 
         self.num_edges_param = None if num_edges is None else int(num_edges)
         self.max_iter = max_iter  # если None → 100*|V|
