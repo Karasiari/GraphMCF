@@ -317,7 +317,10 @@ class MCFGeneratorMultiGraphSA:
         it = 0
         for _ in range(max_iter):
             # метрики на входе внешней итерации
-            a_old = graph.calculate_alpha()
+            if graph.alpha is None:
+                a_old = graph.calculate_alpha()
+            else:
+                a_old = graph.alpha
             alpha_hist.append(a_old)
             edges_hist.append(graph.demands_graph.number_of_edges())
             w_now = [d["weight"] for *_, d in graph.demands_graph.edges(data=True)]
@@ -423,6 +426,8 @@ class MCFGeneratorMultiGraphSA:
                     })
                 # оставляем изменения как есть
             else:
+                # возвращаем актуальное значение alpha
+                graph.alpha = a_old
                 # --- ОТКАТ в обратном порядке ---
                 for rec in reversed(proposal_applied):
                     # 1) убрать добавленное мультиребро (это обратный шаг к _append_multiedge)
