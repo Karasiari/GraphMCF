@@ -35,6 +35,9 @@ class GraphMCF:
         self.demands_graph: Optional[nx.Graph] = None
         self.demands_laplacian: Optional[np.ndarray] = None
 
+        # последнее вычисленное alpha
+        self.alpha: Optional[float] = None
+
         # кэши для расчёта alpha / cut
         self.graph_pinv_sqrt: Optional[np.ndarray] = None
         self.graph_spec: Optional[Dict[str, Any]] = None
@@ -330,6 +333,7 @@ class GraphMCF:
         lam_max = float(eig[0]) if eig.size else 0.0
         #lam_max = float(np.linalg.eigvalsh(L_alpha)[-1]) if L_alpha.size else 0.0
         tr = float(np.trace(L_alpha))
+        self.alpha = lam_max / tr if tr != 0.0 else float("inf")
         return lam_max / tr if tr != 0.0 else float("inf")
 
     def calculate_alpha_timed(self) -> (float, dict):
